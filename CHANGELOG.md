@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.1 — 2026-08-21
+
+No code changes. 0.1.0 was published before the documentation switched to the
+registry install, so its package page told readers to install from GitHub and
+warned about a build script that a registry install never runs.
+
+
 ## 0.1.0 — 2026-08-21
 
 Published to npm as `dsh-relay`, prebuilt, so `dsh plugin add dsh-relay` needs no

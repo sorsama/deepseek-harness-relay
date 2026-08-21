@@ -1,6 +1,6 @@
 {
   "name": "dsh-relay",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Authenticated remote access for a DeepSeek Harness web profile: TLS, QR/passcode device pairing, password sign-in, and per-device revocation in front of an untouched loopback harness.",
   "keywords": [
     "dsh-plugin",
