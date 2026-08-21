@@ -66,11 +66,11 @@ describe('cordis.patch.yml', () => {
     const relay = parsed
       .flatMap(entry => ('insert' in entry ? entry.insert : []))
       .find(row => row.id === 'relay')
-    expect(relay).toBeDefined()
+    if (relay === undefined) throw new Error('the patch no longer inserts a relay row')
     // `disabled` is the one that bit: `!!js !ctx...` is two tags, not a negation.
-    expect((relay?.disabled as JsExpression).source).toBe('ctx.relayStartup.enabled === false')
+    expect((relay.disabled as JsExpression).source).toBe('ctx.relayStartup.enabled === false')
     for (const key of ['bind', 'port', 'stateDir', 'tls', 'publicHostnames']) {
-      const value = relay?.config?.[key] as JsExpression
+      const value = relay.config?.[key] as JsExpression
       expect(value.source, key).toMatch(/\S/)
       expect(value.source, key).not.toMatch(/^!/)
     }
