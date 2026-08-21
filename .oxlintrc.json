@@ -1,0 +1,18 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "categories": {
+    "correctness": "error",
+    "suspicious": "warn"
+  },
+  "env": {
+    "node": true,
+    "es2024": true
+  },
+  "ignorePatterns": [
+    "lib/**",
+    "node_modules/**"
+  ],
+  "rules": {
+    "unicorn/require-module-specifiers": "off"
+  }
+}

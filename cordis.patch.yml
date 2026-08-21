@@ -1,0 +1,33 @@
+# dsh-relay bundle layer.
+#
+# Two rows, and nothing else is touched. The harness webserver row keeps its
+# shipped loopback bind: the relay is a SECOND listener in front of it, so a
+# misconfigured or failed relay degrades to "unreachable", never to "open to
+# the network". The relay refuses to start if it finds the webserver already
+# bound to 0.0.0.0.
+#
+# `relay-startup` parses this bundle's own flags and provides them as an
+# ordinary Cordis service; the `relay` row injects that service and reads it
+# from `!!js` expressions, so a flag beats the value composed beside it. Keep
+# those expressions when overriding this row in a profile patch — a patch that
+# replaces `config` with literals removes the runtime read, and the flags stop
+# working.
+
+- insert:
+    - id: relay-startup
+      name: 'dsh-relay/startup'
+
+    - id: relay
+      name: 'dsh-relay'
+      inject: [relayStartup]
+      disabled: !!js !ctx.relayStartup.enabled
+      config:
+        bind: !!js ctx.relayStartup.bind ?? '0.0.0.0'
+        port: !!js ctx.relayStartup.port ?? 3443
+        stateDir: !!js dshHomePath('relay')
+        tls: !!js ctx.relayStartup.tls ?? 'self-signed'
+        publicHostnames: !!js ctx.relayStartup.publicHostnames
+        compat:
+          addressGrants: true
+          addressGrantTtlMs: 86400000
+          plainPort: !!js ctx.relayStartup.plainPort ?? 0
