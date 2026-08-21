@@ -1,6 +1,9 @@
 # Changelog
 
-## 0.1.0 — unreleased
+## 0.1.0 — 2026-08-21
+
+Published to npm as `dsh-relay`, prebuilt, so `dsh plugin add dsh-relay` needs no
+build permission on the installing machine.
 
 First release.
 

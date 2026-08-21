@@ -1,5 +1,8 @@
 # dsh-relay
 
+[![npm](https://img.shields.io/npm/v/dsh-relay)](https://www.npmjs.com/package/dsh-relay)
+[![CI](https://github.com/sorsama/deepseek-harness-relay/actions/workflows/ci.yml/badge.svg)](https://github.com/sorsama/deepseek-harness-relay/actions/workflows/ci.yml)
+
 Authenticated remote access for a [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) web profile — reach your harness from your phone over Wi-Fi, or from anywhere if you forward a port, without leaving an unauthenticated coding agent open on the network.
 
 Built on DeepSeek Harness. Not an official DeepSeek project.
@@ -44,13 +47,13 @@ Because the harness stays on loopback, a relay that fails to start or is misconf
 The short version. If your harness currently binds `0.0.0.0` (the DSH Mobile LAN patch), remove that row from `~/.dsh/profiles/web/cordis.patch.yml` first — the relay refuses to start in front of an already-open server. Then:
 
 ```sh
-dsh plugin --profile web add github:sorsama/deepseek-harness-relay
+dsh plugin --profile web add dsh-relay
 dsh web
 ```
 
 No `dsh` on your PATH? Every command works the same as `npx @deepseek-ai/dsh ...`.
 
-The install builds from source in a `prepare` script, and adding a bundle needs a restart. The terminal then prints the relay URL. Open `/relay/password` on it **from the machine running the harness** and set a password — until one exists that page is loopback-only, so nobody on the network can claim the relay first.
+The registry package ships prebuilt, so nothing runs a build on your machine; adding a bundle needs a restart. The terminal then prints the relay URL. Open `/relay/password` on it **from the machine running the harness** and set a password — until one exists that page is loopback-only, so nobody on the network can claim the relay first.
 
 A request from that machine never has to sign in: loopback is the operator, because whoever is at the keyboard already has a shell. The password is what the network needs.
 

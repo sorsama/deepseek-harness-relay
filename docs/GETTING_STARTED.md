@@ -53,15 +53,15 @@ The `webserver` row should read `host: 127.0.0.1`.
 ## 2. Install the relay
 
 ```sh
-npx @deepseek-ai/dsh plugin --profile web add github:sorsama/deepseek-harness-relay
+npx @deepseek-ai/dsh plugin --profile web add dsh-relay
 ```
 
-This fetches the sources and builds them in a `prepare` script — you will see a short tsdown build scroll past. When it finishes, the profile manifest lists the bundle:
+The published package ships prebuilt, so nothing compiles on your machine and no build permission is involved. It takes a few seconds. When it finishes, the profile manifest lists the bundle:
 
 ```jsonc
 // ~/.dsh/profiles/web/package.json
 {
-  "dependencies": { "dsh-relay": "github:sorsama/deepseek-harness-relay" },
+  "dependencies": { "dsh-relay": "^0.1.0" },
   "dsh": { "profile": { "bundles": [
     "@deepseek-ai/dsh-base",
     "@deepseek-ai/dsh-web-app",
@@ -72,11 +72,13 @@ This fetches the sources and builds them in a `prepare` script — you will see 
 
 If you get `dsh-relay declares no dsh.bundle`, the install did not land — see [Installing from a local checkout](#installing-from-a-local-checkout) below, which is the usual cause on Windows.
 
-Pin a commit if you would rather a later push could not change what runs on your machine:
+To follow unreleased work instead, install from git and pin a commit so a later push cannot silently change what runs on your machine:
 
 ```sh
 npx @deepseek-ai/dsh plugin --profile web add github:sorsama/deepseek-harness-relay#<sha>
 ```
+
+That route builds from source in a `prepare` script, which pnpm may ask you to allow — see [Installing from a local checkout](#installing-from-a-local-checkout) for the same allowance.
 
 ## 3. Restart
 
