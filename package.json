@@ -72,6 +72,9 @@
   "peerDependenciesMeta": {
     "@deepseek-ai/dsh-host-webserver": {
       "optional": true
+    },
+    "@deepseek-ai/cordis": {
+      "optional": true
     }
   },
   "devDependencies": {
