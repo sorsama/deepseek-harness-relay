@@ -132,6 +132,26 @@ Pairing from the browser is what makes the app work: it records your phone's net
 
 That is weaker than a real credential and the relay treats it that way — private addresses only, one day by default, gone when you revoke the device, and never able to reach the harness settings or credentials. It stops working when your phone's address changes, which happens on a Wi-Fi/cellular switch or a DHCP lease renewal; just pair again. See [SECURITY.md](SECURITY.md) for the full list of what a source address does and does not prove.
 
+## Where the relay's settings are
+
+**Not in the harness Settings page.** The relay ships no browser plugin, so it
+contributes no card there — that was a deliberate call: a plugin whose browser
+bundle fails to load takes the whole web application down with it, including on
+loopback, and a settings card cannot work from a phone anyway because the
+harness computes "am I local" in the browser from the page address.
+
+Its pages are its own, and a **Relay** link in the bottom-right corner of the
+harness UI goes to them:
+
+| Page | What it does |
+|---|---|
+| `/relay/devices` | paired devices with revoke, relay status, the certificate pin, sign out everywhere |
+| `/relay/pair` | the QR and the code for enrolling a device |
+| `/relay/password` | set or change the password |
+| `/relay/health` | liveness, no authentication |
+
+Turn the link off with `uiLink: false` if you would rather not have it.
+
 ## Changing settings
 
 **There are no `--relay-*` command-line flags, and there cannot be.** The harness's web app owns the invocation's parser and rejects any option it does not declare — `npx @deepseek-ai/dsh web --anything-it-does-not-know` fails before any plugin loads. So there are two ways to configure the relay.
@@ -205,6 +225,8 @@ Removing the plugin leaves `~/.dsh/relay/` in place — delete that directory to
 **`overlay …\cordis.patch.yml must be a top-level YAML array`** — you removed the last row and left only comments. Add `[]` on its own line.
 
 **The relay let me straight into the chat without asking for a password.** Expected, if you opened it on the machine running the harness — loopback is the operator. Set the password at `/relay/password` and check it from another device.
+
+**I can't find the relay in the harness Settings page.** It is not there by design — see [Where the relay's settings are](#where-the-relays-settings-are). Use the **Relay** link in the bottom-right corner, or go to `/relay/devices`.
 
 **Your phone cannot reach the address the relay printed.** It prints every adapter, and a virtual one (`192.168.56.x` is VirtualBox's default) is not routable from your phone. Use the address on the same network your phone is on.
 

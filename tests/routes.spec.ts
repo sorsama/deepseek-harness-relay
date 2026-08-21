@@ -14,6 +14,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { Authenticator } from '../src/auth/index.ts'
+import { injectRelayLink } from '../src/badge.ts'
 import { Config, type Config as RelayConfig } from '../src/config.ts'
 import { startListener, type RelayListener, type RelayRuntime } from '../src/server.ts'
 import { RelayStore } from '../src/state.ts'
@@ -139,4 +140,26 @@ describe('the devices page', () => {
     const answer = await get('/relay/devices')
     expect(answer.body).toContain('Change the password')
   }, 20_000)
+})
+
+describe('the link into the harness UI', () => {
+  it('injects one anchor before the closing body tag', () => {
+    const injected = injectRelayLink('<!doctype html><html><body><div id="root"></div></body></html>')
+    expect(injected).toContain('href="/relay/devices"')
+    expect(injected.indexOf('dsh-relay-link')).toBeLessThan(injected.indexOf('</body>'))
+  })
+
+  it('is idempotent — the tap runs on every index response, including SPA fallbacks', () => {
+    const once = injectRelayLink('<body></body>')
+    expect(injectRelayLink(once)).toBe(once)
+  })
+
+  it('leaves a document with no body element alone rather than throwing', () => {
+    expect(injectRelayLink('not html at all')).toBe('not html at all')
+  })
+
+  it('styles itself from the harness theme tokens, with a fallback for first paint', () => {
+    const injected = injectRelayLink('<body></body>')
+    expect(injected).toContain('var(--dsw-alias-bg-layer-2, #fff)')
+  })
 })

@@ -27,6 +27,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import { Authenticator } from './auth/index.ts'
 import { assertCoherent, Config } from './config.ts'
+import { injectRelayLink } from './badge.ts'
 import { assertTrustedAuthority, localAddresses, relayAuthorities } from './fence.ts'
 import { advertise } from './mdns.ts'
 import { relayStateDir } from './paths.ts'
@@ -78,6 +79,13 @@ export function apply(ctx: Context, config: Config): void {
   }
 
   const log = loggerFor(ctx)
+
+  if (config.uiLink) {
+    // The SPA server runs every registered tap over each index response, so
+    // this reaches the application without a browser plugin — and unregisters
+    // with the plugin, leaving no trace in a page served after an unload.
+    ctx.effect(() => ctx.webServer.tapIndex(injectRelayLink), 'dsh-relay: web UI link')
+  }
 
   ctx.effect(() => {
     const started = start(ctx, config, log)

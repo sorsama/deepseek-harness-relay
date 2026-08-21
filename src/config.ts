@@ -96,6 +96,13 @@ export interface Config {
   /** Upstream response deadline for a proxied request. */
   proxyTimeoutMs: number
   compat: CompatConfig
+  /**
+   * Add a link to the relay's own pages into the harness web UI.
+   *
+   * The relay ships no browser plugin, so without this its pairing, device,
+   * and password pages are reachable only by typing a path.
+   */
+  uiLink: boolean
   /** Advertise `_dsh._tcp` over mDNS. */
   mdns: boolean
   /** Service name used in the mDNS advertisement; empty derives one from the hostname. */
@@ -127,6 +134,7 @@ export const Config: z<Config> = z.object({
     addressGrantTtlMs: z.natural().min(60_000).default(86_400_000),
     plainPort: z.natural().max(65535).default(0),
   }),
+  uiLink: z.boolean().default(true),
   mdns: z.boolean().default(true),
   mdnsName: z.string().default(''),
 })

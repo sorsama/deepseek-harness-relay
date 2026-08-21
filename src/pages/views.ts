@@ -132,7 +132,7 @@ export function pairPage(options: {
   <form method="post" action="/relay/pair/new">
     <button class="outline" type="submit">New code</button>
   </form>
-  <p class="caption"><a href="/relay/devices">Paired devices</a></p>`,
+  <p class="caption"><a href="/relay/devices">Paired devices</a> &middot; <a href="/">Back to the harness</a></p>`,
   })
 }
 
@@ -266,7 +266,8 @@ export function devicesPage(options: {
   <form method="post" action="/relay/signout-everywhere">
     <button class="outline" type="submit">Sign out everywhere</button>
   </form>
-  <p class="caption">Signing out everywhere rotates the signing key: every paired device and every browser session stops working at once.</p>`,
+  <p class="caption">Signing out everywhere rotates the signing key: every paired device and every browser session stops working at once.</p>
+  <p class="caption"><a href="/">Back to the harness</a></p>`,
   })
 }
 

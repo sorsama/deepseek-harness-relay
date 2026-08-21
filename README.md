@@ -34,7 +34,7 @@ Because the harness stays on loopback, a relay that fails to start or is misconf
 - **A device list** with per-device revoke and a "sign out everywhere" that rotates the signing key.
 - **TLS**, either from your own certificate or self-signed with a published SPKI pin.
 - **mDNS advertisement** on `_dsh._tcp`, so a client can find the relay without sweeping the subnet.
-- **The whole web UI**, unchanged. The proxy is transparent, so the browser app works from a phone exactly as it does locally.
+- **The whole web UI**, unchanged. The proxy is transparent, so the browser app works from a phone exactly as it does locally, with a **Relay** link in the corner for the pages above.
 
 ## Install
 
@@ -115,6 +115,7 @@ Every value lives in your profile's `cordis.patch.yml` under the `relay` row. Yo
 | `extraProxyPaths` | `[]` | Additional path prefixes a write may address. |
 | `compat.addressGrants` | `true` | The DSH Mobile 0.5.0 bridge described above. |
 | `compat.plainPort` | `0` | Plain-HTTP listener for clients that cannot use TLS. |
+| `uiLink` | `true` | Add the **Relay** link to the harness web UI. |
 | `mdns` | `true` | Advertise `_dsh._tcp`. |
 
 ### Per-invocation overrides
