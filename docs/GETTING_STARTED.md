@@ -134,11 +134,25 @@ That is weaker than a real credential and the relay treats it that way — priva
 
 ## Where the relay's settings are
 
-**Not in the harness Settings page.** The relay ships no browser plugin, so it
-contributes no card there — that was a deliberate call: a plugin whose browser
-bundle fails to load takes the whole web application down with it, including on
-loopback, and a settings card cannot work from a phone anyway because the
-harness computes "am I local" in the browser from the page address.
+**Not in the harness Settings page.** That tab lists the settings namespaces
+that have a registered card, and the relay ships no browser plugin, so it
+registers none. Two reasons, both measured rather than assumed:
+
+- A package that declares `dsh.client` and whose `lib/client.js` is missing
+  makes `ClientModuleRegistry` throw, and that failure is fatal to the whole
+  boot — `dsh web` exits with `client-modules: 1 client package failed to
+  compose` and **no web UI starts at all, loopback included**. A git install
+  whose build script pnpm declined to run produces exactly that state. A
+  settings tab is not worth putting your harness one failed build away from
+  not starting.
+- It would not work from a phone regardless. `ui-settings` builds its store as
+  `connection.isLoopback ? 'host' : 'memory'`, and `isLoopback` is computed in
+  the browser from `location.hostname` — the relay's server-side `Host`
+  rewrite is invisible to it, so the card would render nothing on the remote
+  devices this plugin exists for.
+
+Publishing to npm with `lib/` prebuilt removes the first risk, and a card may
+follow once that is the install route.
 
 Its pages are its own, and a **Relay** link in the bottom-right corner of the
 harness UI goes to them:

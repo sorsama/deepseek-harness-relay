@@ -18,6 +18,13 @@ First release.
   credential: a plain-HTTP listener and short-lived private-address grants that
   never reach the harness configuration plane.
 - Refuses to start when the harness web server is already bound to `0.0.0.0`.
+- Ships no browser plugin, so it adds no card to the harness's Plugin
+  configuration tab. Verified why: a `dsh.client` package whose `lib/client.js`
+  is missing makes `ClientModuleRegistry` throw, and `dsh web` then exits
+  without serving any web UI at all — a git install whose build script was
+  declined produces that state. A **Relay** link injected through
+  `ctx.webServer.tapIndex` reaches the relay's own pages instead, with no
+  script and nothing that can fail to load.
 - Configuration lives entirely in the bundle patch and the profile's own layer.
   There is no `--relay-*` command line: the surface app owns the invocation's
   parser and rejects any option it does not declare, so a flag a bundle added
