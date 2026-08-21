@@ -20,7 +20,9 @@
     - id: relay
       name: 'dsh-relay'
       inject: [relayStartup]
-      disabled: !!js !ctx.relayStartup.enabled
+      # Written as an equality rather than `!ctx...`: a `!` directly after the
+      # `!!js` tag reads as a second tag property and fails the YAML parse.
+      disabled: !!js ctx.relayStartup.enabled === false
       config:
         bind: !!js ctx.relayStartup.bind ?? '0.0.0.0'
         port: !!js ctx.relayStartup.port ?? 3443
