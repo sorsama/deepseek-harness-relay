@@ -21,7 +21,7 @@ import type { Authenticator, Identity } from './auth/index.ts'
 import { SESSION_COOKIE } from './auth/index.ts'
 import { pairingPayload } from './auth/pairing.ts'
 import type { Config } from './config.ts'
-import { claimPage, devicesPage, loginPage, messagePage, pairPage, pairedPage } from './pages/views.ts'
+import { claimPage, devicesPage, loginPage, messagePage, pairPage, pairedPage, passwordPage } from './pages/views.ts'
 import { parseFields, readBody, safeNextPath, sendHtml, sendJson, sendRedirect, sessionCookie, wantsJson } from './wire.ts'
 
 /** Prefix owning every route in this module. */
@@ -115,15 +115,32 @@ export async function handleRelayRoute(
   }
 
   if (path === '/relay/login' && method === 'GET') {
+    // Setup comes before the redirect. A loopback request is the operator and
+    // is let through to the harness without signing in — which, before this
+    // branch existed, meant the one place a password could be set bounced
+    // straight past the form and no password could ever be set at all.
+    if (!auth.hasPassword && isOperator(identity)) {
+      sendRedirect(res, '/relay/password')
+      return
+    }
     if (isAuthenticated(identity)) {
       sendRedirect(res, safeNextPath(url.searchParams.get('next')))
       return
     }
-    if (!auth.hasPassword && identity.credential !== 'loopback') {
+    if (!auth.hasPassword) {
       refuse(req, res, 'No password is set yet. Set one from the machine running the harness first.')
       return
     }
-    sendHtml(res, 200, loginPage({
+    sendHtml(res, 200, loginPage({ next: safeNextPath(url.searchParams.get('next')) }))
+    return
+  }
+
+  if (path === '/relay/password' && method === 'GET') {
+    if (auth.hasPassword ? !isOperator(identity) : identity.credential !== 'loopback') {
+      refuse(req, res, 'Set the password from the machine running the harness.')
+      return
+    }
+    sendHtml(res, 200, passwordPage({
       hasPassword: auth.hasPassword,
       next: safeNextPath(url.searchParams.get('next')),
     }))
@@ -142,16 +159,18 @@ export async function handleRelayRoute(
     if (body === undefined) { refuse(req, res, 'Request too large.'); return }
     const fields = parseFields(req, body)
     const password = fields.password ?? ''
-    if (password.length < 10) {
-      sendHtml(res, 400, loginPage({ hasPassword: false, error: 'Use at least 10 characters.', next: '/' }))
-      return
+    const next = safeNextPath(fields.next ?? '/relay/devices')
+    const reject = (message: string): void => {
+      sendHtml(res, 400, passwordPage({ hasPassword: auth.hasPassword, error: message, next }))
     }
+    if (password.length < 10) { reject('Use at least 10 characters.'); return }
     if (fields.confirm !== undefined && fields.confirm !== password) {
-      sendHtml(res, 400, loginPage({ hasPassword: false, error: 'The two passwords do not match.', next: '/' }))
+      reject('The two passwords do not match.')
       return
     }
     await auth.setPassword(password)
-    sendRedirect(res, '/relay/login')
+    if (wantsJson(req)) { sendJson(res, 200, { ok: true }); return }
+    sendRedirect(res, next)
     return
   }
 
@@ -166,11 +185,11 @@ export async function handleRelayRoute(
       return
     }
     if (outcome === 'locked-out') {
-      sendHtml(res, 429, loginPage({ hasPassword: true, error: 'Too many attempts. Try again later.', next }))
+      sendHtml(res, 429, loginPage({ error: 'Too many attempts. Try again later.', next }))
       return
     }
     if (outcome === 'bad-password') {
-      sendHtml(res, 403, loginPage({ hasPassword: true, error: 'That password did not match.', next }))
+      sendHtml(res, 403, loginPage({ error: 'That password did not match.', next }))
       return
     }
     const cookie = sessionCookie({
@@ -272,6 +291,7 @@ export async function handleRelayRoute(
       devices: auth.devices,
       now,
       tlsMode: config.tls,
+      hasPassword: auth.hasPassword,
       fingerprint: context.fingerprint,
       url: context.origin,
       plainUrl: context.plainOrigin,

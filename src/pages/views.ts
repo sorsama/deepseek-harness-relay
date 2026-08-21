@@ -26,41 +26,18 @@ function since(timestamp: number | undefined, now: number): string {
 }
 
 /**
- * The sign-in page, or the first-run page that sets the password.
- * @param options.hasPassword - whether a password has been set at all.
+ * The sign-in page.
  * @param options.error - message to show above the form.
  * @param options.next - path to return to after a successful sign-in.
  * @returns the full HTML document.
  */
 export function loginPage(options: {
-  readonly hasPassword: boolean
   readonly error?: string | undefined
   readonly next: string
 }): string {
   const notice = options.error === undefined
     ? ''
     : `<div class="notice error">${escapeHtml(options.error)}</div>`
-  const nextField = `<input type="hidden" name="next" value="${escapeHtml(options.next)}">`
-
-  if (!options.hasPassword) {
-    return page({
-      title: 'Set a relay password',
-      body: `
-  <h1>Set a password</h1>
-  <p>No password is set yet. Choose one now — anyone who signs in can run commands on this machine, because that is what the agent does.</p>
-  ${notice}
-  <form method="post" action="/relay/password">
-    ${nextField}
-    <label for="password">New password</label>
-    <input id="password" name="password" type="password" autocomplete="new-password" required minlength="10" autofocus>
-    <label for="confirm">Confirm</label>
-    <input id="confirm" name="confirm" type="password" autocomplete="new-password" required minlength="10">
-    <button class="primary" type="submit">Set password</button>
-  </form>
-  <p class="caption">This page is reachable only from the machine running the harness until a password exists.</p>`,
-    })
-  }
-
   return page({
     title: 'Sign in',
     body: `
@@ -68,11 +45,55 @@ export function loginPage(options: {
   <p>This relay fronts a DeepSeek Harness on this machine.</p>
   ${notice}
   <form method="post" action="/relay/login">
-    ${nextField}
+    <input type="hidden" name="next" value="${escapeHtml(options.next)}">
     <label for="password">Password</label>
     <input id="password" name="password" type="password" autocomplete="current-password" required autofocus>
     <button class="primary" type="submit">Sign in</button>
   </form>`,
+  })
+}
+
+/**
+ * The page that sets a password, or replaces the one already set.
+ *
+ * This is deliberately separate from the sign-in page. A request from the
+ * machine running the harness is already the operator — asking it for a
+ * password would be theatre, since whoever is there has a shell — so the
+ * sign-in page redirects it straight through. That left first-run setup with
+ * nowhere to happen, which is what this page is for.
+ * @param options.hasPassword - whether a password already exists.
+ * @param options.error - message to show above the form.
+ * @param options.next - path to return to afterwards.
+ * @returns the full HTML document.
+ */
+export function passwordPage(options: {
+  readonly hasPassword: boolean
+  readonly error?: string | undefined
+  readonly next: string
+}): string {
+  const notice = options.error === undefined
+    ? ''
+    : `<div class="notice error">${escapeHtml(options.error)}</div>`
+  const heading = options.hasPassword ? 'Change the password' : 'Set a password'
+  const lead = options.hasPassword
+    ? 'Replacing it does not sign anyone out. Use <strong>sign out everywhere</strong> on the devices page for that.'
+    : 'Nobody can sign in from the network until you set one. Anyone who does can run commands on this machine, because that is what the agent does.'
+  return page({
+    title: heading,
+    body: `
+  <h1>${escapeHtml(heading)}</h1>
+  <p>${lead}</p>
+  ${notice}
+  <form method="post" action="/relay/password">
+    <input type="hidden" name="next" value="${escapeHtml(options.next)}">
+    <label for="password">${options.hasPassword ? 'New password' : 'Password'}</label>
+    <input id="password" name="password" type="password" autocomplete="new-password" required minlength="10" autofocus>
+    <label for="confirm">Confirm</label>
+    <input id="confirm" name="confirm" type="password" autocomplete="new-password" required minlength="10">
+    <button class="primary" type="submit">${options.hasPassword ? 'Replace password' : 'Set password'}</button>
+  </form>
+  <p class="caption">At least 10 characters. Only reachable from the machine running the harness${
+    options.hasPassword ? ', or with an existing session' : ''}.</p>`,
   })
 }
 
@@ -185,6 +206,7 @@ export function devicesPage(options: {
   readonly devices: readonly DeviceRecord[]
   readonly now: number
   readonly tlsMode: string
+  readonly hasPassword: boolean
   readonly fingerprint?: string | undefined
   readonly url: string
   readonly plainUrl?: string | undefined
@@ -230,9 +252,17 @@ export function devicesPage(options: {
   </div>
   ${pin}
   <div class="rows">${rows}</div>
+  <div class="row">
+    <div class="meta">
+      <span class="name">Password sign-in</span>
+      <span class="sub">${options.hasPassword ? 'set' : 'not set — nobody can sign in from the network'}</span>
+    </div>
+    <span class="dot ${options.hasPassword ? 'ok' : 'off'}"></span>
+  </div>
   <form method="post" action="/relay/pair/new">
     <button class="primary" type="submit">Pair a new device</button>
   </form>
+  <p class="caption"><a href="/relay/password">${options.hasPassword ? 'Change the password' : 'Set a password'}</a></p>
   <form method="post" action="/relay/signout-everywhere">
     <button class="outline" type="submit">Sign out everywhere</button>
   </form>

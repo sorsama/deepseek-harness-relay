@@ -90,7 +90,7 @@ You should now see three extra lines before the usual harness URL:
 
 ```
 [dsh-relay] listening on https://127.0.0.1:3443 https://10.0.1.20:3443 (harness on 127.0.0.1:3080)
-[dsh-relay] no password set yet — open https://127.0.0.1:3443/relay/login on this machine to set one
+[dsh-relay] no password set yet — open https://127.0.0.1:3443/relay/password on this machine to set one
 dsh web: http://127.0.0.1:3080
 ```
 
@@ -98,11 +98,15 @@ Every address the machine has is listed, not a guess at the best one. If you run
 
 ## 4. Set a password
 
-Open `https://127.0.0.1:3443/relay/login` **on the machine running the harness**. Your browser will warn about the certificate — that is expected on the default self-signed setting; accept it for now, and see [Certificates](#certificates) if you want that gone.
+Open `https://127.0.0.1:3443/relay/password` **on the machine running the harness**. Your browser will warn about the certificate — that is expected on the default self-signed setting; accept it for now, and see [Certificates](#certificates) if you want that gone.
 
-Until a password exists the page is loopback-only, so nobody on the network can reach the relay and claim it first.
+Until a password exists that page is loopback-only, so nobody on the network can reach the relay and claim it first.
 
 Pick something long. Anyone who signs in can run commands on this computer, because that is what the agent does.
+
+You can change it later from the same page, linked from `/relay/devices`.
+
+**A request from this machine never has to sign in.** Loopback is the operator: whoever is at the keyboard already has a shell, so a password there would be theatre, and `https://127.0.0.1:3443/` drops you straight into the harness. The password is what the *network* needs. Browse to the relay from another device to see the sign-in page.
 
 ## 5. Pair your phone
 
@@ -199,6 +203,8 @@ Removing the plugin leaves `~/.dsh/relay/` in place — delete that directory to
 **`dsh-relay: the harness web server is bound to 0.0.0.0`** — step 1. Remove the LAN patch row.
 
 **`overlay …\cordis.patch.yml must be a top-level YAML array`** — you removed the last row and left only comments. Add `[]` on its own line.
+
+**The relay let me straight into the chat without asking for a password.** Expected, if you opened it on the machine running the harness — loopback is the operator. Set the password at `/relay/password` and check it from another device.
 
 **Your phone cannot reach the address the relay printed.** It prints every adapter, and a virtual one (`192.168.56.x` is VirtualBox's default) is not routable from your phone. Use the address on the same network your phone is on.
 

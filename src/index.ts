@@ -167,7 +167,7 @@ async function start(
     log.warn(`plain compatibility listener on port ${String(compat.port)}: DSH Mobile 0.5.0 only, no configuration access`)
   }
   if (!auth.hasPassword) {
-    log.info(`no password set yet — open ${scheme}://127.0.0.1:${String(primary.port)}/relay/login on this machine to set one`)
+    log.info(`no password set yet — open ${scheme}://127.0.0.1:${String(primary.port)}/relay/password on this machine to set one`)
   }
 
   const unadvertise = config.mdns

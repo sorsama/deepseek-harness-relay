@@ -18,6 +18,7 @@ The workaround people use today is a config patch that rebinds the web server to
 
 ```
 phone / browser ──TLS──▶ relay :3443 ──plain HTTP──▶ harness 127.0.0.1:3080
+                          ├─ /relay/password
                           ├─ /relay/login
                           ├─ /relay/pair
                           ├─ /relay/devices
@@ -48,7 +49,9 @@ dsh web
 
 No `dsh` on your PATH? Every command works the same as `npx @deepseek-ai/dsh ...`.
 
-The install builds from source in a `prepare` script, and adding a bundle needs a restart. The terminal then prints the relay URL. Open it **on the machine running the harness** and set a password — until one exists the sign-in page is loopback-only, so nobody on the network can claim the relay first.
+The install builds from source in a `prepare` script, and adding a bundle needs a restart. The terminal then prints the relay URL. Open `/relay/password` on it **from the machine running the harness** and set a password — until one exists that page is loopback-only, so nobody on the network can claim the relay first.
+
+A request from that machine never has to sign in: loopback is the operator, because whoever is at the keyboard already has a shell. The password is what the network needs.
 
 ## Pair a phone
 
