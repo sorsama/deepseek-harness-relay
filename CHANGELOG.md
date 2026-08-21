@@ -2,9 +2,16 @@
 
 ## 0.1.1 — 2026-08-21
 
-No code changes. 0.1.0 was published before the documentation switched to the
-registry install, so its package page told readers to install from GitHub and
-warned about a build script that a registry install never runs.
+- `/relay/...` on the harness's own port answered with the single-page
+  application, which routed straight back to the chat — so both a typed URL and
+  the injected **Relay** link were dead ends there. The plugin now registers a
+  redirect for that prefix on the harness's web server, carrying the path and
+  query to the relay's listener. A request arriving through the relay is
+  unaffected: the relay serves `/relay` itself and forwards only what it does
+  not own.
+- 0.1.0 was published before the documentation switched to the registry
+  install, so its package page told readers to install from GitHub and warned
+  about a build script that a registry install never runs.
 
 
 ## 0.1.0 — 2026-08-21

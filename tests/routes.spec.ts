@@ -159,7 +159,10 @@ describe('the link into the harness UI', () => {
   })
 
   it('styles itself from the harness theme tokens, with a fallback for first paint', () => {
-    const injected = injectRelayLink('<body></body>')
-    expect(injected).toContain('var(--dsw-alias-bg-layer-2, #fff)')
+    expect(injectRelayLink('<body></body>')).toContain('var(--dsw-alias-bg-layer-2, #fff)')
+  })
+
+  it('needs no script — the relative href is answered by the redirect route', () => {
+    expect(injectRelayLink('<body></body>')).not.toContain('<script')
   })
 })

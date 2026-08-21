@@ -32,6 +32,7 @@ import { assertTrustedAuthority, localAddresses, relayAuthorities } from './fenc
 import { advertise } from './mdns.ts'
 import { relayStateDir } from './paths.ts'
 import { installSettingsSection } from './settings-section.ts'
+import { RELAY_PREFIX } from './routes.ts'
 import { startListener, type RelayRuntime } from './server.ts'
 import { RelayStore } from './state.ts'
 import { certificateSans, loadCertificate } from './tls.ts'
@@ -80,13 +81,6 @@ export function apply(ctx: Context, config: Config): void {
   }
 
   const log = loggerFor(ctx)
-
-  if (config.uiLink) {
-    // The SPA server runs every registered tap over each index response, so
-    // this reaches the application without a browser plugin — and unregisters
-    // with the plugin, leaving no trace in a page served after an unload.
-    ctx.effect(() => ctx.webServer.tapIndex(injectRelayLink), 'dsh-relay: web UI link')
-  }
 
   ctx.effect(() => {
     const supervisor = new Supervisor(ctx, log)
@@ -234,6 +228,28 @@ async function start(
   if (compat !== undefined) runtime.plainPort = compat.port
 
   const scheme = material === undefined ? 'http' : 'https'
+
+  // Two registrations on the harness's own web server, both needing the port
+  // the relay actually bound (`port: 0` asks the operating system to choose).
+  //
+  // The redirect is what makes `/relay/...` work on the harness's own loopback
+  // port at all. Nothing else claims that prefix there, so without it the
+  // single-page application's catch-all answers and routes the person back to
+  // the chat — a dead end for a typed URL and for the link below alike. A
+  // request arriving through the relay never reaches this route, because the
+  // relay serves `/relay` itself and forwards only what it does not own.
+  const unroute = ctx.webServer.register({
+    kind: 'prefix',
+    path: RELAY_PREFIX,
+    handler: (req, res) => {
+      const host = typeof req.headers.host === 'string' ? req.headers.host : '127.0.0.1'
+      const hostname = host.replace(/:\d+$/, '')
+      const target = `${scheme}://${hostname}:${String(primary.port)}${req.url ?? RELAY_PREFIX}`
+      res.writeHead(302, { location: target, 'cache-control': 'no-store' })
+      res.end()
+    },
+  })
+  const untap = config.uiLink ? ctx.webServer.tapIndex(injectRelayLink) : () => undefined
   // Every address, not a guess at the best one: a machine with a
   // virtual-machine or VPN adapter alongside real Wi-Fi has several, and the
   // first one the operating system reports is regularly the one a phone has
@@ -267,6 +283,8 @@ async function start(
     // async disposers concurrently with no completion ordering, so anything
     // order-dependent belongs inside a single one.
     stop: async () => {
+      untap()
+      unroute()
       await unadvertise()
       await compat?.close()
       await primary.close()

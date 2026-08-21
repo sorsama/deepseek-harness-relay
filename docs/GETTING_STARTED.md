@@ -231,6 +231,8 @@ Removing the plugin leaves `~/.dsh/relay/` in place — delete that directory to
 
 **The relay let me straight into the chat without asking for a password.** Expected, if you opened it on the machine running the harness — loopback is the operator. Set the password at `/relay/password` and check it from another device.
 
+**`/relay/devices` sends me back to the chat.** You are on the harness's own port (3080), not the relay's (3443). The harness serves its single-page application for any path it does not recognise, and that routes to the chat. The plugin registers a redirect for `/relay/...` on that port, so this resolves itself after a restart — until then, use the relay's port directly.
+
 **I can't find the relay in the harness Settings page.** Settings → Plugins → Plugin configuration, and only from the machine running the harness — the harness serves settings to a loopback browser only. From a phone, use the **Relay** link in the corner or go to `/relay/devices`.
 
 **Your phone cannot reach the address the relay printed.** It prints every adapter, and a virtual one (`192.168.56.x` is VirtualBox's default) is not routable from your phone. Use the address on the same network your phone is on.
