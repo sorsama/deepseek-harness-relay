@@ -122,7 +122,21 @@ Your phone browser can now reach the full harness UI at `https://<your-lan-ip>:3
 
 ## 6. If you use the DSH Mobile app
 
-DSH Mobile 0.5.0 cannot speak TLS — it hardcodes `http://` for its API calls and both of its WebSocket streams — so it needs a second, plain listener:
+**0.8.0 and later — pair in the app.** Nothing extra to configure: step 5 is the whole of it. Open **Relay → Pair a relay** and scan the QR from `/relay/pair`, or type the address and the eight-digit code. The app holds a real bearer token, speaks TLS, and pins the certificate by the key this relay publishes.
+
+Once every client you use has paired, turn the compatibility bridge off:
+
+```yaml
+compat:
+  addressGrants: false
+```
+
+Nothing in 0.8.0 needs it, and a source address is not authentication — see [SECURITY.md](SECURITY.md).
+
+<details>
+<summary>0.5.0 through 0.7.0 — the compatibility path</summary>
+
+Those releases cannot present a credential: no `Authorization` header, no cookies, no `Origin`. (0.7.0 learned `https://`, but only for a reverse proxy it can validate against a certificate authority — not for a self-signed relay.) They need a second, plain listener:
 
 ```sh
 DSH_RELAY_PLAIN_PORT=3444 npx @deepseek-ai/dsh web
@@ -130,9 +144,13 @@ DSH_RELAY_PLAIN_PORT=3444 npx @deepseek-ai/dsh web
 
 Then pair from the phone's **browser** as in step 5 (over `https://…:3443`), and point the app at `<your-lan-ip>` port `3444`.
 
-Pairing from the browser is what makes the app work: it records your phone's network address, and the app connects from that same address. The app itself has no field that can hold a token.
+Pairing from the browser is what makes it work: it records your phone's network address, and the app connects from that same address.
 
-That is weaker than a real credential and the relay treats it that way — private addresses only, one day by default, gone when you revoke the device, and never able to reach the harness settings or credentials. It stops working when your phone's address changes, which happens on a Wi-Fi/cellular switch or a DHCP lease renewal; just pair again. See [SECURITY.md](SECURITY.md) for the full list of what a source address does and does not prove.
+That is weaker than a real credential and the relay treats it that way — private addresses only, one day by default, gone when you revoke the device, and never able to reach the harness settings or credentials. It stops working when your phone's address changes, which happens on a Wi-Fi/cellular switch or a DHCP lease renewal; just pair again.
+
+Upgrading to 0.8.0 is the better fix.
+
+</details>
 
 ## Where the relay's settings are
 

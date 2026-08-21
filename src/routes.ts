@@ -185,7 +185,12 @@ export async function handleRelayRoute(
       return
     }
     if (outcome === 'locked-out') {
-      sendHtml(res, 429, loginPage({ error: 'Too many attempts. Try again later.', next }))
+      // `Retry-After` because the client contract says a 429 carries one, and a client that
+      // believed it would otherwise busy-retry against a lockout: the rate limiter sets the header
+      // but this path never did, and the two are indistinguishable from the outside.
+      sendHtml(res, 429, loginPage({ error: 'Too many attempts. Try again later.', next }), {
+        'retry-after': String(Math.ceil(config.lockoutMs / 1000)),
+      })
       return
     }
     if (outcome === 'bad-password') {
@@ -251,6 +256,22 @@ export async function handleRelayRoute(
       name: fields.name ?? fields.deviceName ?? 'device',
       address: context.address,
     }, now)
+    if (paired === 'locked-out') {
+      // 429 rather than the pairing-failed 403: nothing is wrong with the code, and a client told
+      // otherwise reloads the pairing page and spends another attempt learning the same thing.
+      const until = auth.lockedUntil(context.address, now) ?? now + config.lockoutMs
+      const retryAfter = String(Math.max(1, Math.ceil((until - now) / 1000)))
+      if (wantsJson(req)) {
+        sendJson(res, 429, { error: 'rate-limited', message: 'Too many attempts. Try again later.' }, {
+          'retry-after': retryAfter,
+        })
+        return
+      }
+      sendHtml(res, 429, claimPage({ error: 'Too many attempts from this device. Try again later.' }), {
+        'retry-after': retryAfter,
+      })
+      return
+    }
     if (paired === undefined) {
       if (wantsJson(req)) {
         sendJson(res, 403, { error: 'pairing-failed', message: 'That code is not valid.' })

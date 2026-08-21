@@ -116,8 +116,12 @@ describe('Authenticator', () => {
         expect(await auth.pair({ code: '00000000', name: 'x', address: '192.168.1.9' }, NOW)).toBeUndefined()
       }
       const code = auth.pairing.issue(8, 300_000, NOW)
-      // The correct code now fails too, because the address is locked out.
-      expect(await auth.pair({ code: code.code, name: 'x', address: '192.168.1.9' }, NOW)).toBeUndefined()
+      // The correct code now fails too, because the address is locked out — and it says so rather
+      // than reporting a bad code, which would send someone to fetch a fresh one that cannot help.
+      expect(await auth.pair({ code: code.code, name: 'x', address: '192.168.1.9' }, NOW)).toBe('locked-out')
+      expect(auth.lockedUntil('192.168.1.9', NOW)).toBeGreaterThan(NOW)
+      // And an address that never failed is not swept up in it.
+      expect(auth.lockedUntil('192.168.1.10', NOW)).toBeUndefined()
       auth.dispose()
     })
   })
@@ -248,10 +252,14 @@ describe('assertCoherent', () => {
     }).toThrow(/must differ/)
   })
 
-  it('refuses a compatibility listener nothing could authenticate against', () => {
+  it('allows a compatibility listener with address grants off', () => {
+    // It used to refuse this pair, on the reasoning that the plain listener served only
+    // address-granted clients. That stopped being true once a client could hold a token: the
+    // listener accepts the `device` class, so it is reachable with grants off — which is exactly
+    // the configuration an operator reaches for once every client has paired.
     expect(() => {
       assertCoherent(configFor({ compat: { addressGrants: false, addressGrantTtlMs: 60_000, plainPort: 8080 } }))
-    }).toThrow(/addressGrants/)
+    }).not.toThrow()
   })
 
   it('refuses a relative extra proxy path', () => {

@@ -43,6 +43,21 @@ async function post(path: string, fields: Record<string, string>): Promise<{ sta
   return { status: response.status, location: response.headers.get('location'), body: await response.text() }
 }
 
+/** One JSON claim against `/relay/pair`, as a native client sends it. */
+async function claim(code: string): Promise<{ status: number, retryAfter: string | null, body: string }> {
+  const response = await fetch(`${base}/relay/pair`, {
+    method: 'POST',
+    redirect: 'manual',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ code, name: 'Test device' }),
+  })
+  return {
+    status: response.status,
+    retryAfter: response.headers.get('retry-after'),
+    body: await response.text(),
+  }
+}
+
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), 'dsh-relay-routes-'))
   store = await RelayStore.open(dir)
@@ -164,5 +179,43 @@ describe('the link into the harness UI', () => {
 
   it('needs no script — the relative href is answered by the redirect route', () => {
     expect(injectRelayLink('<body></body>')).not.toContain('<script')
+  })
+})
+
+describe('a locked-out caller is told to wait, not that the code was wrong', () => {
+  it('answers a pairing lockout with 429 and a Retry-After', async () => {
+    auth.pairing.issue(8, 300_000, Date.now())
+    // Default maxFailedAttempts is 5; spend them on a code that cannot match.
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const refused = await claim('00000000')
+      expect(refused.status).toBe(403)
+      expect(refused.body).toContain('pairing-failed')
+    }
+
+    // The sixth is refused for a different reason, and says so. Reporting it as pairing-failed
+    // sends someone to reload the pairing page, which spends another attempt proving the same
+    // thing — the code is not what is wrong.
+    const locked = await claim('00000000')
+    expect(locked.status).toBe(429)
+    expect(locked.body).toContain('rate-limited')
+    expect(Number(locked.retryAfter)).toBeGreaterThan(0)
+  })
+
+  it('answers a sign-in lockout with a Retry-After, as the client contract promises', async () => {
+    await post('/relay/password', { password: 'a-long-test-password', confirm: 'a-long-test-password' })
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      await post('/relay/login', { password: 'wrong-password-here' })
+    }
+
+    const response = await fetch(`${base}/relay/login`, {
+      method: 'POST',
+      redirect: 'manual',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ password: 'a-long-test-password' }).toString(),
+    })
+    expect(response.status).toBe(429)
+    // The rate limiter set this header and the lockout did not, which are indistinguishable from
+    // outside — so a client that trusted the documented header busy-retried against a lockout.
+    expect(Number(response.headers.get('retry-after'))).toBeGreaterThan(0)
   })
 })

@@ -45,7 +45,14 @@ export interface CompatConfig {
    *
    * DSH Mobile 0.5.0 hardcodes `http://` for both its RPC calls and its two
    * WebSocket downlinks, so a TLS-only relay is unreachable by it. Zero
-   * disables the listener; it only ever accepts address-granted clients.
+   * disables the listener.
+   *
+   * It accepts a bearer token as readily as an address grant, so it stays
+   * useful once grants are off — for a client that holds a credential but
+   * cannot pin a certificate. What it never carries is a password session: a
+   * sign-in cookie must not cross an unencrypted hop. The token does travel in
+   * the clear on it, which is the operator's call to make, the same as `tls:
+   * off`.
    */
   plainPort: number
 }
@@ -153,12 +160,6 @@ export function assertCoherent(config: Config): void {
   }
   if (config.compat.plainPort !== 0 && config.compat.plainPort === config.port) {
     throw new Error('dsh-relay: compat.plainPort must differ from port')
-  }
-  if (config.compat.plainPort !== 0 && !config.compat.addressGrants) {
-    throw new Error(
-      'dsh-relay: compat.plainPort serves only address-granted clients, so it is unreachable '
-      + 'while compat.addressGrants is false',
-    )
   }
   for (const path of config.extraProxyPaths) {
     if (!path.startsWith('/')) {

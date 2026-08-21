@@ -124,6 +124,16 @@ export class Authenticator {
   }
 
   /**
+   * When an address's lockout expires, or undefined when it is not locked out.
+   * @param address - the normalized source address.
+   * @param now - current epoch millis.
+   * @returns epoch millis the lockout lifts.
+   */
+  lockedUntil(address: string, now: number): number | undefined {
+    return this.#throttle.lockedUntil(address, now)
+  }
+
+  /**
    * Classify one request.
    * @param request - the request's headers, source address, and locality.
    * @param now - current epoch millis.
@@ -227,8 +237,11 @@ export class Authenticator {
     readonly code: string
     readonly name: string
     readonly address: string
-  }, now: number): Promise<{ readonly token: string, readonly device: DeviceRecord } | undefined> {
-    if (this.#throttle.lockedUntil(options.address, now) !== undefined) return undefined
+  }, now: number): Promise<{ readonly token: string, readonly device: DeviceRecord } | 'locked-out' | undefined> {
+    // Distinguished from a refused code on purpose. Both used to answer "that code is not valid",
+    // which sends someone to reload the pairing page for a fresh code — the one thing that cannot
+    // help while their address is locked out, and which spends another attempt confirming it.
+    if (this.#throttle.lockedUntil(options.address, now) !== undefined) return 'locked-out'
     if (!this.pairing.claim(options.code, now)) {
       this.#throttle.recordFailure(options.address, now)
       return undefined

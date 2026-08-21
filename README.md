@@ -65,21 +65,47 @@ A request from that machine never has to sign in: loopback is the operator, beca
 
 ## Using it with DSH Mobile
 
-[DSH Mobile](https://github.com/sorsama/deepseek-harness-mobile) 0.5.0 predates this plugin and has two limits the relay works around rather than pretends away:
+[DSH Mobile](https://github.com/sorsama/deepseek-harness-mobile) **0.8.0** implements
+`docs/CLIENT_INTEGRATION.md` in full: it pairs by QR or passcode, carries a bearer token on every
+`/api` call and both WebSocket upgrades, and pins this relay's key rather than trusting a
+certificate authority. Pair it from **Relay → Pair a relay** and nothing else is needed.
 
-**It cannot speak TLS.** The app hardcodes `http://` for its RPC calls and both of its WebSocket downlinks, so it cannot reach a TLS listener. Run a plain listener alongside the TLS one:
+Once every client you use is on 0.8.0 and paired, turn the bridge off:
+
+```yaml
+compat:
+  addressGrants: false
+```
+
+<details>
+<summary>0.5.0 through 0.7.0 — the compatibility path, and what it costs</summary>
+
+Those releases predate this plugin and have two limits it works around rather than pretends away.
+
+**They cannot reach a self-signed listener.** Up to 0.6.0 the app hardcoded `http://` for its RPC
+calls and both downlinks; 0.7.0 learned `https://`, but validates it against a certificate
+authority, which a self-signed relay is not. Run a plain listener alongside the TLS one:
 
 ```sh
 DSH_RELAY_PLAIN_PORT=3444 dsh web
 ```
 
-The plain listener accepts only compatibility clients, serves no sign-in or pairing pages, and never reaches the harness settings or credentials.
+That listener serves no sign-in or pairing pages and never reaches the harness settings or
+credentials.
 
-**It cannot present a credential.** The app sends no `Authorization` header, no cookies, and no `Origin` — there is no field in it that could carry a token. So pairing from the phone's *browser* records that phone's network address, and the app then connects from the same address.
+**They cannot present a credential.** They send no `Authorization` header, no cookies, and no
+`Origin` — no field in them could carry a token. So pairing from the phone's *browser* records that
+phone's network address, and the app then connects from the same address.
 
-Be clear-eyed about what that is: a source address is **not** authentication. It is shared behind NAT, reassigned by DHCP, rotated by IPv6 privacy extensions, and spoofable by anything on the same Wi-Fi. The relay narrows it as far as it can — private address ranges only, a TTL, dies with the device that created it, and never reaches the configuration plane — but it is a bridge until the app can hold a token, not a destination. Turn it off with `compat.addressGrants: false` and pair a client that can authenticate.
+Be clear-eyed about what that is: a source address is **not** authentication. It is shared behind
+NAT, reassigned by DHCP, rotated by IPv6 privacy extensions, and spoofable by anything on the same
+Wi-Fi. The relay narrows it as far as it can — private ranges only, a TTL, dies with the device that
+created it, and never reaches the configuration plane — but it is a bridge, not a destination.
+Upgrading the client is the fix.
 
-`docs/CLIENT_INTEGRATION.md` is the contract for that client work.
+</details>
+
+`docs/CLIENT_INTEGRATION.md` is the contract, for anyone writing another client.
 
 ## Configuration
 
@@ -117,8 +143,8 @@ Every value lives in your profile's `cordis.patch.yml` under the `relay` row. Yo
 | `rateLimitPerMinute` | 600 | Per-address request ceiling. |
 | `privilegedMethods` | `allow-authenticated` | Whether an authenticated remote client reaches settings, credentials, model discovery, and host pickers. Address-granted clients never do, regardless. |
 | `extraProxyPaths` | `[]` | Additional path prefixes a write may address. |
-| `compat.addressGrants` | `true` | The DSH Mobile 0.5.0 bridge described above. |
-| `compat.plainPort` | `0` | Plain-HTTP listener for clients that cannot use TLS. |
+| `compat.addressGrants` | `true` | The pre-0.8.0 DSH Mobile bridge described above. |
+| `compat.plainPort` | `0` | Plain-HTTP listener for clients that cannot use TLS. Accepts a bearer token as well as a grant, so it outlives `addressGrants`. |
 | `uiLink` | `true` | Add the **Relay** link to the harness web UI. |
 | `mdns` | `true` | Advertise `_dsh._tcp`. |
 

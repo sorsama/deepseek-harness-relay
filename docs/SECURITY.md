@@ -32,7 +32,9 @@ So the question this plugin answers is not "how do we restrict what a remote use
 
 ## Address grants: read this before enabling them
 
-DSH Mobile 0.5.0 hardcodes `http://` and sends no `Authorization` header, no cookies, and no `Origin`. There is no field in that client that can carry a credential. The only facts the relay can observe about it are the port it connected to and the address it came from.
+DSH Mobile up to 0.7.0 sends no `Authorization` header, no cookies, and no `Origin`. There is no field in those releases that can carry a credential, so the only facts the relay can observe about such a client are the port it connected to and the address it came from.
+
+**DSH Mobile 0.8.0 and later do not need this.** They pair, hold a bearer token, and pin this relay's key. If every client you use is on 0.8.0, set `compat.addressGrants: false` and skip the rest of this section.
 
 So `compat.addressGrants` accepts requests from an address a paired device was last seen on. **A source address is not authentication.** Specifically:
 
@@ -45,7 +47,9 @@ So `compat.addressGrants` accepts requests from an address a paired device was l
 
 The relay narrows this as far as it can: private ranges only, a TTL, revoked with the device that created it, and **never privileged** — an address-granted client cannot reach settings, credentials, model discovery, or the host directory pickers no matter how `privilegedMethods` is configured.
 
-It is enabled by default only because the alternative available to that client today is the fully unauthenticated LAN patch, which is strictly worse. Set `compat.addressGrants: false` as soon as your client can hold a token.
+It is enabled by default only because the alternative available to an older client is the fully unauthenticated LAN patch, which is strictly worse. Set `compat.addressGrants: false` as soon as every client you use can hold a token.
+
+Turning grants off does **not** turn off `compat.plainPort`. That listener accepts a bearer token as readily as a grant, so it stays usable by a paired client that cannot pin a certificate — the token travels in the clear on it, which is your call to make, the same as `tls: off`.
 
 ## The privileged method set
 
