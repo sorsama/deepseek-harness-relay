@@ -37,33 +37,18 @@ Because the harness stays on loopback, a relay that fails to start or is misconf
 
 ## Install
 
-The relay is a bundle. Install it into your `web` profile and restart:
+**New here? Start with [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md)** — a step-by-step walkthrough for `npx @deepseek-ai/dsh web`, including the LAN patch you have to remove first.
+
+The short version. If your harness currently binds `0.0.0.0` (the DSH Mobile LAN patch), remove that row from `~/.dsh/profiles/web/cordis.patch.yml` first — the relay refuses to start in front of an already-open server. Then:
 
 ```sh
-dsh plugin --profile web add dsh-relay
+dsh plugin --profile web add github:sorsama/deepseek-harness-relay
 dsh web
 ```
 
-The terminal prints the relay URL. Open it **on the machine running the harness** and set a password — until one exists, the sign-in page is loopback-only, so nobody on the network can claim the relay first.
+No `dsh` on your PATH? Every command works the same as `npx @deepseek-ai/dsh ...`.
 
-<details>
-<summary>Installing from GitHub instead</summary>
-
-A git install fetches sources, not build output, so the package builds itself in a `prepare` script — and pnpm ≥10 blocks that until you allow it. The first `add` fails and prints the key to allow; put it in your profile's `pnpm-workspace.yaml`:
-
-```yaml
-allowBuilds:
-  dsh-relay: true
-```
-
-then re-run the `add`. Pin a commit so a later push cannot silently change what runs on your machine:
-
-```sh
-dsh plugin --profile web add github:sorsama/deepseek-harness-relay#<sha>
-```
-
-That allowance is permission to execute this package's code at install time, outside any sandbox the agent runs under. A tarball (`pnpm pack`) or a registry install needs no such permission.
-</details>
+The install builds from source in a `prepare` script, and adding a bundle needs a restart. The terminal then prints the relay URL. Open it **on the machine running the harness** and set a password — until one exists the sign-in page is loopback-only, so nobody on the network can claim the relay first.
 
 ## Pair a phone
 
@@ -78,7 +63,7 @@ That allowance is permission to execute this package's code at install time, out
 **It cannot speak TLS.** The app hardcodes `http://` for its RPC calls and both of its WebSocket downlinks, so it cannot reach a TLS listener. Run a plain listener alongside the TLS one:
 
 ```sh
-dsh web --relay-plain-port 3444
+DSH_RELAY_PLAIN_PORT=3444 dsh web
 ```
 
 The plain listener accepts only compatibility clients, serves no sign-in or pairing pages, and never reaches the harness settings or credentials.
@@ -91,22 +76,20 @@ Be clear-eyed about what that is: a source address is **not** authentication. It
 
 ## Configuration
 
-Every value lives in your profile's `cordis.patch.yml` under the `relay` row. Restating the row replaces its whole `config`, so keep the `!!js` expressions if you want the flags to keep working.
+Every value lives in your profile's `cordis.patch.yml` under the `relay` row. Your layer applies after the bundle's, so it wins. A patch replaces the row's **whole** `config`, so restate every key you want — including `stateDir`, which has no default.
 
 ```yaml
 - id: relay
   name: 'dsh-relay'
-  inject: [relayStartup]
-  disabled: !!js !ctx.relayStartup.enabled
   config:
-    bind: !!js ctx.relayStartup.bind ?? '0.0.0.0'
-    port: !!js ctx.relayStartup.port ?? 3443
+    bind: '0.0.0.0'
+    port: 3443
     stateDir: !!js dshHomePath('relay')
-    tls: files
-    tlsCertPath: /path/to/fullchain.pem
-    tlsKeyPath: /path/to/privkey.pem
+    tls: 'files'
+    tlsCertPath: '/path/to/fullchain.pem'
+    tlsKeyPath: '/path/to/privkey.pem'
     publicHostnames: ['relay.example.com']
-    privilegedMethods: allow-authenticated
+    privilegedMethods: 'allow-authenticated'
     compat:
       addressGrants: true
       addressGrantTtlMs: 86400000
@@ -131,17 +114,20 @@ Every value lives in your profile's `cordis.patch.yml` under the `relay` row. Re
 | `compat.plainPort` | `0` | Plain-HTTP listener for clients that cannot use TLS. |
 | `mdns` | `true` | Advertise `_dsh._tcp`. |
 
-### Command line
+### Per-invocation overrides
 
-Flags beat the composed values for one invocation:
+**There are no `--relay-*` flags, and there cannot be.** The harness's web app owns the invocation's parser and rejects any option it does not declare, so a flag added by a bundle fails `dsh web` before any plugin loads. The shipped patch reads the environment instead:
 
-```
---relay-port <port>          listen port; 0 lets the OS pick one
---relay-bind <host>          listen address
---relay-plain-port <port>    extra plain-HTTP listener
---relay-tls <mode>           self-signed | files | off
---relay-hostname <authority> name this relay is reached by; repeatable
---no-relay                   do not start the relay this time
+| Variable | Effect |
+|---|---|
+| `DSH_RELAY_PORT` | primary listener port |
+| `DSH_RELAY_BIND` | listen address |
+| `DSH_RELAY_TLS` | `self-signed`, `files`, or `off` |
+| `DSH_RELAY_PLAIN_PORT` | plain-HTTP listener port; `0` disables it |
+| `DSH_RELAY_DISABLE=1` | skip the relay entirely this run |
+
+```sh
+DSH_RELAY_PLAIN_PORT=3444 dsh web
 ```
 
 ## Certificates
@@ -198,11 +184,8 @@ built entry points directly:
 
 ```yaml
 - insert:
-    - id: relay-startup
-      name: 'file:///D:/path/to/deepseek-harness-relay/lib/startup.js'
     - id: relay
       name: 'file:///D:/path/to/deepseek-harness-relay/lib/index.js'
-      inject: [relayStartup]
       config:
         stateDir: 'D:/path/to/scratch/relay-state'
         tls: 'off'

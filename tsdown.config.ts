@@ -17,7 +17,6 @@ import type { UserConfig } from 'tsdown'
 /** Production dependencies stay imports; everything else is inlined. */
 const EXTERNALS = [
   /^bonjour-service(\/|$)/,
-  /^commander(\/|$)/,
   /^qrcode(\/|$)/,
   /^selfsigned(\/|$)/,
   /^@deepseek-ai\//,
@@ -29,8 +28,8 @@ const isExternal = (specifier: string): boolean => EXTERNALS.some(pattern => pat
 const config: UserConfig = {
   name: 'dsh-relay',
   entry: fromSource
-    ? ['src/index.ts', 'src/startup.ts']
-    : ['lib/types/index.js', 'lib/types/startup.js'],
+    ? ['src/index.ts']
+    : ['lib/types/index.js'],
   outDir: 'lib',
   format: ['esm'],
   platform: 'node',

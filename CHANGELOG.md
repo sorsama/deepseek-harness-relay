@@ -18,3 +18,8 @@ First release.
   credential: a plain-HTTP listener and short-lived private-address grants that
   never reach the harness configuration plane.
 - Refuses to start when the harness web server is already bound to `0.0.0.0`.
+- Configuration lives entirely in the bundle patch and the profile's own layer.
+  There is no `--relay-*` command line: the surface app owns the invocation's
+  parser and rejects any option it does not declare, so a flag a bundle added
+  would fail `dsh web` before this plugin loaded. Per-invocation overrides read
+  `DSH_RELAY_*` from the environment through the patch's `!!js` expressions.

@@ -49,9 +49,9 @@ describe('cordis.patch.yml', () => {
     expect(Array.isArray(parsed)).toBe(true)
   })
 
-  it('inserts exactly the two rows this bundle owns and overrides nothing', () => {
+  it('inserts exactly the one row this bundle owns and overrides nothing', () => {
     const inserts = parsed.flatMap(entry => ('insert' in entry ? entry.insert : []))
-    expect(inserts.map(row => row.id)).toEqual(['relay-startup', 'relay'])
+    expect(inserts.map(row => row.id)).toEqual(['relay'])
     // An entry outside an `insert` would be overriding somebody else's row.
     expect(parsed.every(entry => 'insert' in entry)).toBe(true)
   })
@@ -62,14 +62,14 @@ describe('cordis.patch.yml', () => {
     expect(targeted).not.toContain('connection')
   })
 
-  it('reads every flag-backed value through a js expression', () => {
+  it('reads every overridable value through a js expression', () => {
     const relay = parsed
       .flatMap(entry => ('insert' in entry ? entry.insert : []))
       .find(row => row.id === 'relay')
     if (relay === undefined) throw new Error('the patch no longer inserts a relay row')
     // `disabled` is the one that bit: `!!js !ctx...` is two tags, not a negation.
-    expect((relay.disabled as JsExpression).source).toBe('ctx.relayStartup.enabled === false')
-    for (const key of ['bind', 'port', 'stateDir', 'tls', 'publicHostnames']) {
+    expect((relay.disabled as JsExpression).source).toBe("process.env.DSH_RELAY_DISABLE === '1'")
+    for (const key of ['bind', 'port', 'stateDir', 'tls']) {
       const value = relay.config?.[key] as JsExpression
       expect(value.source, key).toMatch(/\S/)
       expect(value.source, key).not.toMatch(/^!/)

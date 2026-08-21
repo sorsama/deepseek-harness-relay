@@ -28,4 +28,4 @@ jobs:
       - run: pnpm build
       - name: the published entry points exist
         shell: bash
-        run: test -f lib/index.js && test -f lib/startup.js
+        run: test -f lib/index.js
