@@ -35,7 +35,12 @@ dsh-relay: the harness web server is bound to 0.0.0.0, so it is already
 reachable without authentication and this relay would protect nothing.
 ```
 
-If the file has nothing else in it, an empty file or a file with only comments is fine.
+If that leaves the file with nothing but comments, put an empty list in it. The loader requires a top-level YAML array, and a file of comments alone parses as `null`:
+
+```yaml
+# nothing to override right now
+[]
+```
 
 Confirm the harness is back on loopback:
 
@@ -84,10 +89,12 @@ npx @deepseek-ai/dsh web
 You should now see three extra lines before the usual harness URL:
 
 ```
-[dsh-relay] listening on https://192.168.1.20:3443 (harness on 127.0.0.1:3080)
+[dsh-relay] listening on https://127.0.0.1:3443 https://10.0.1.20:3443 (harness on 127.0.0.1:3080)
 [dsh-relay] no password set yet — open https://127.0.0.1:3443/relay/login on this machine to set one
 dsh web: http://127.0.0.1:3080
 ```
+
+Every address the machine has is listed, not a guess at the best one. If you run VirtualBox, WSL, or a VPN you will see their adapters here too — use the one on the same network as your phone. `ipconfig` tells you which is which.
 
 ## 4. Set a password
 
@@ -190,6 +197,10 @@ Removing the plugin leaves `~/.dsh/relay/` in place — delete that directory to
 **`error: unknown option '--relay-…'`** — expected. There are no relay flags; use the environment variables above.
 
 **`dsh-relay: the harness web server is bound to 0.0.0.0`** — step 1. Remove the LAN patch row.
+
+**`overlay …\cordis.patch.yml must be a top-level YAML array`** — you removed the last row and left only comments. Add `[]` on its own line.
+
+**Your phone cannot reach the address the relay printed.** It prints every adapter, and a virtual one (`192.168.56.x` is VirtualBox's default) is not routable from your phone. Use the address on the same network your phone is on.
 
 **Nothing answers from the phone, the connection just times out.** Windows puts an unrecognised network into the Public profile and blocks inbound TCP. In an elevated PowerShell:
 

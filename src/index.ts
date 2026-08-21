@@ -149,13 +149,17 @@ async function start(
       compat: true,
       authorities,
     })
-  if (compat !== undefined) {
-    runtime.plainOrigin = `http://${localAddresses()[0] ?? '127.0.0.1'}:${String(compat.port)}`
-  }
+  if (compat !== undefined) runtime.plainPort = compat.port
 
   const scheme = material === undefined ? 'http' : 'https'
-  const reachable = localAddresses()[0] ?? '127.0.0.1'
-  log.info(`listening on ${scheme}://${reachable}:${String(primary.port)} (harness on 127.0.0.1:${String(ctx.webServer.port)})`)
+  // Every address, not a guess at the best one: a machine with a
+  // virtual-machine or VPN adapter alongside real Wi-Fi has several, and the
+  // first one the operating system reports is regularly the one a phone has
+  // no route to.
+  const reachable = ['127.0.0.1', ...localAddresses()]
+    .map(address => `${scheme}://${address}:${String(primary.port)}`)
+    .join(' ')
+  log.info(`listening on ${reachable} (harness on 127.0.0.1:${String(ctx.webServer.port)})`)
   if (material === undefined) {
     log.warn('serving plaintext: anything on the network path can read this traffic and the credentials on it')
   }

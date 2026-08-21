@@ -41,8 +41,16 @@ export interface RelayRuntime {
   readonly config: Config
   readonly target: UpstreamTarget
   readonly fingerprint?: string | undefined
-  /** Origin of the plain-HTTP compatibility listener, when one is running. */
-  plainOrigin?: string | undefined
+  /**
+   * Port of the plain-HTTP compatibility listener, when one is running.
+   *
+   * The port rather than a whole origin: a machine commonly has several LAN
+   * addresses (a virtual-machine adapter alongside real Wi-Fi), and picking
+   * one at startup names an address the client may have no route to. The
+   * origin is built per request from the host the client actually reached,
+   * which is reachable from that client by construction.
+   */
+  plainPort?: number | undefined
   /** Report a refusal; the plugin routes this to the Cordis logger. */
   readonly log: (message: string) => void
 }
@@ -119,6 +127,19 @@ function originOf(req: IncomingMessage, secure: boolean): string {
 }
 
 /**
+ * The plain listener's origin, as this client would reach it.
+ * @param req - the inbound request, read for the host it addressed.
+ * @param plainPort - the compatibility listener's port, when one is running.
+ * @returns the origin, or undefined when no plain listener exists.
+ */
+function plainOriginOf(req: IncomingMessage, plainPort: number | undefined): string | undefined {
+  if (plainPort === undefined) return undefined
+  const host = typeof req.headers.host === 'string' ? req.headers.host : 'localhost'
+  const hostname = host.replace(/:\d+$/, '')
+  return `http://${hostname}:${String(plainPort)}`
+}
+
+/**
  * Serve one request, in the order the module comment describes.
  * @param req - the inbound request.
  * @param res - the response, owned entirely by this call.
@@ -175,7 +196,7 @@ async function serve(
       identity,
       address,
       origin: originOf(req, policy.secure),
-      plainOrigin: runtime.plainOrigin,
+      plainOrigin: plainOriginOf(req, runtime.plainPort),
       fingerprint: runtime.fingerprint,
       secure: policy.secure,
       now,
