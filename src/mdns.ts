@@ -32,6 +32,12 @@ export interface Advertisement {
   readonly name: string
 }
 
+/** One published service handle, which reports failures as events. */
+interface PublishedService {
+  on: (event: 'error', listener: (error: unknown) => void) => void
+  stop: (callback?: () => void) => void
+}
+
 /** The `bonjour-service` surface this module uses. */
 interface BonjourLike {
   publish(options: {
@@ -39,7 +45,7 @@ interface BonjourLike {
     type: string
     port: number
     txt: Record<string, string>
-  }): { stop: (callback?: () => void) => void }
+  }): PublishedService
   unpublishAll(callback?: () => void): void
   destroy(): void
 }
@@ -65,8 +71,13 @@ export async function advertise(
   }
 
   try {
-    bonjour.publish({
-      name: advertisement.name === '' ? `DSH Relay on ${hostname()}` : advertisement.name,
+    const service = bonjour.publish({
+      // The port is part of the default name because a name collision on the
+      // network is reported as a failure, and two relays on one machine — a
+      // second harness, or one being tested beside another — are ordinary.
+      name: advertisement.name === ''
+        ? `DSH Relay on ${hostname()} (${String(advertisement.port)})`
+        : advertisement.name,
       type: SERVICE_TYPE,
       port: advertisement.port,
       txt: {
@@ -76,6 +87,14 @@ export async function advertise(
         ...advertisement.plainPort !== undefined && { plain: String(advertisement.plainPort) },
         ...advertisement.fingerprint !== undefined && { pin: advertisement.fingerprint },
       },
+    })
+    // A name collision is reported asynchronously, long after publish() has
+    // returned. Without this listener the emitter has no handler and the
+    // failure escapes as an unhandled error — taking down a process whose
+    // relay is otherwise serving perfectly well, over an advertisement that
+    // nothing yet consumes.
+    service.on('error', (error: unknown) => {
+      onError(`mDNS advertisement failed, continuing without it: ${String(error)}`)
     })
   } catch (error) {
     onError(`mDNS publish failed: ${String(error)}`)

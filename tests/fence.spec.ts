@@ -128,3 +128,41 @@ describe('relayAuthorities', () => {
     expect(authorities.filter(entry => entry === 'relay.example.com')).toHaveLength(1)
   })
 })
+
+describe('cross-site navigations', () => {
+  const navigation = {
+    'sec-fetch-site': 'cross-site',
+    'sec-fetch-mode': 'navigate',
+    'sec-fetch-dest': 'document',
+  }
+
+  it('admits a top-level GET — typing the address, or following a link here', () => {
+    // Chrome marks a navigation from the new-tab page cross-site. Refusing it
+    // would make the relay unreachable by the ordinary way of reaching a page.
+    expect(checkFence({
+      headers: { host: '127.0.0.1:3443', ...navigation },
+      method: 'GET',
+    }, AUTHORITIES)).toBeUndefined()
+  })
+
+  it('refuses a cross-site form post — that is the forgery vector', () => {
+    expect(checkFence({
+      headers: { host: '127.0.0.1:3443', ...navigation },
+      method: 'POST',
+    }, AUTHORITIES)).toBe('cross-site')
+  })
+
+  it('refuses a cross-site fetch, whatever its method', () => {
+    expect(checkFence({
+      headers: { host: '127.0.0.1:3443', 'sec-fetch-site': 'cross-site', 'sec-fetch-mode': 'cors' },
+      method: 'GET',
+    }, AUTHORITIES)).toBe('cross-site')
+  })
+
+  it('refuses a cross-site subresource load dressed as a navigation', () => {
+    expect(checkFence({
+      headers: { host: '127.0.0.1:3443', ...navigation, 'sec-fetch-dest': 'image' },
+      method: 'GET',
+    }, AUTHORITIES)).toBe('cross-site')
+  })
+})

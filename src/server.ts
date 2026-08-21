@@ -165,7 +165,7 @@ async function serve(
     return
   }
 
-  const rejection = checkFence(req, authorities)
+  const rejection = checkFence({ headers: req.headers, method: req.method }, authorities)
   if (rejection !== undefined) {
     runtime.log(`refused ${req.method ?? 'GET'} ${req.url ?? '/'} from ${address}: ${rejection}`)
     res.writeHead(403, { 'content-type': 'text/plain; charset=utf-8' })
@@ -299,7 +299,7 @@ function serveUpgrade(
   const address = normalizeAddress(req.socket.remoteAddress)
   const local = isLoopbackHostname(address === '' ? 'x' : address)
 
-  if (checkFence(req, authorities) !== undefined) {
+  if (checkFence({ headers: req.headers, method: req.method }, authorities) !== undefined) {
     rejectUpgrade(socket, 403, 'Forbidden')
     return
   }

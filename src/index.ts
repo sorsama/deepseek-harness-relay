@@ -31,6 +31,7 @@ import { injectRelayLink } from './badge.ts'
 import { assertTrustedAuthority, localAddresses, relayAuthorities } from './fence.ts'
 import { advertise } from './mdns.ts'
 import { relayStateDir } from './paths.ts'
+import { installSettingsSection } from './settings-section.ts'
 import { startListener, type RelayRuntime } from './server.ts'
 import { RelayStore } from './state.ts'
 import { certificateSans, loadCertificate } from './tls.ts'
@@ -88,15 +89,88 @@ export function apply(ctx: Context, config: Config): void {
   }
 
   ctx.effect(() => {
-    const started = start(ctx, config, log)
-    // The effect's disposer must await teardown: cordis reloads this plugin on
-    // a config edit, and re-listening on a port whose previous server has not
-    // finished closing fails with EADDRINUSE.
-    return async () => {
-      const running = await started.catch(() => undefined)
-      await running?.stop()
-    }
+    const supervisor = new Supervisor(ctx, log)
+    let source = (): Config => config
+    installSettingsSection(ctx, Config, config, {
+      setSource: (current) => { source = current },
+      onChange: () => { supervisor.apply(source()) },
+    })
+    supervisor.apply(source())
+    return async () => { await supervisor.stop() }
   }, 'dsh-relay: listeners')
+}
+
+/**
+ * Keeps exactly one relay running across configuration changes.
+ *
+ * A settings edit replaces the whole resolved configuration, including the
+ * listen ports, so the response is to tear the listeners down and bind again.
+ * Every transition runs on one chain: overlapping edits would otherwise race
+ * to bind the same port, and re-listening before the previous close has
+ * settled fails with EADDRINUSE. A generation counter lets a superseded
+ * transition drop out instead of starting a relay nobody asked for.
+ */
+class Supervisor {
+  #generation = 0
+  #chain: Promise<void> = Promise.resolve()
+  #running: RunningRelay | undefined
+  #applied: string | undefined
+
+  /**
+   * @param ctx - the plugin context passed through to each launch.
+   * @param log - the relay's logging.
+   */
+  constructor(
+    private readonly ctx: Context,
+    private readonly log: { info: (message: string) => void, warn: (message: string) => void },
+  ) {}
+
+  /**
+   * Run the relay under a new configuration, replacing any current one.
+   *
+   * An unusable configuration leaves the running relay alone rather than
+   * taking it down: a typo in a settings form should not cost the operator
+   * their remote access until they can reach the machine to fix it.
+   * @param config - the newly resolved configuration.
+   */
+  apply(config: Config): void {
+    try {
+      assertCoherent(config)
+    } catch (error) {
+      this.log.warn(`ignoring an unusable configuration, keeping the running one: ${String(error)}`)
+      return
+    }
+    // The settings service attaching re-reports the value the relay is already
+    // running under. Rebinding on that would drop every live connection —
+    // including the WebSocket downlinks a phone is mid-session on — for no
+    // change at all, so an identical configuration is a no-op.
+    const fingerprint = JSON.stringify(config)
+    if (fingerprint === this.#applied) return
+    this.#applied = fingerprint
+    const mine = ++this.#generation
+    this.#chain = this.#chain.then(async () => {
+      if (mine !== this.#generation) return
+      await this.#running?.stop()
+      this.#running = undefined
+      if (mine !== this.#generation) return
+      try {
+        this.#running = await start(this.ctx, config, this.log)
+      } catch (error) {
+        this.log.warn(`failed to start: ${String(error)}`)
+      }
+    }, () => undefined)
+  }
+
+  /**
+   * Stop for good.
+   * @returns resolution once the last transition has settled and the listeners are closed.
+   */
+  async stop(): Promise<void> {
+    this.#generation += 1
+    await this.#chain
+    await this.#running?.stop()
+    this.#running = undefined
+  }
 }
 
 /** A running relay and the handle that tears it down. */

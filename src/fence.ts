@@ -24,6 +24,8 @@ import { networkInterfaces } from 'node:os'
 /** The request facts the fence reads. */
 export interface FenceRequest {
   readonly headers: IncomingHttpHeaders
+  /** HTTP method; a cross-site read navigation is judged differently from a write. */
+  readonly method?: string | undefined
 }
 
 /** Why a request was refused, for the log line and the response body. */
@@ -181,6 +183,24 @@ function matchesAuthority(hostUrl: URL, authorities: readonly string[]): boolean
 }
 
 /**
+ * Whether this is a browser navigating to a page, rather than fetching data.
+ *
+ * `navigate` mode with a `document` destination is the shape of a person
+ * arriving; restricting it to GET and HEAD keeps a cross-site form post — the
+ * actual request-forgery vector, which shares that mode and destination —
+ * on the refused side.
+ * @param request - the inbound request's method and headers.
+ * @returns true when the request is a safe top-level navigation.
+ */
+function isReadNavigation(request: FenceRequest): boolean {
+  const method = (request.method ?? 'GET').toUpperCase()
+  if (method !== 'GET' && method !== 'HEAD') return false
+  if (header(request.headers, 'sec-fetch-mode') !== 'navigate') return false
+  const destination = header(request.headers, 'sec-fetch-dest')
+  return destination === undefined || destination === 'document'
+}
+
+/**
  * Decide whether one request may reach the relay's routes or its proxy.
  * @param request - the inbound request's headers.
  * @param authorities - the authorities this relay answers to.
@@ -197,10 +217,17 @@ export function checkFence(request: FenceRequest, authorities: readonly string[]
   const hostUrl = parseAuthority(host)
   if (hostUrl === undefined) return 'unparsable-host'
   if (!isLoopbackHostname(hostUrl.hostname) && !matchesAuthority(hostUrl, authorities)) return 'untrusted-host'
-  // Cross-site fence: an explicit cross-site marker is refused regardless of
-  // Origin. This header is read, never stripped — it is a signal, and the only
-  // requests carrying it are browser requests that can be judged by it.
-  if (header(request.headers, 'sec-fetch-site') === 'cross-site') return 'cross-site'
+  // Cross-site fence. The marker alone is not grounds to refuse: a person
+  // typing this relay's address into the bar, or following a link to it from
+  // anywhere else, produces a cross-site top-level navigation, and refusing
+  // that would make the relay unreachable by the ordinary means of reaching a
+  // web page. What must be refused is a cross-site request that READS DATA or
+  // WRITES — a fetch, an image, a subresource, or a form post — because those
+  // are the shapes a hostile page can use. A cross-site GET navigation only
+  // hands the person a page they asked for.
+  if (header(request.headers, 'sec-fetch-site') === 'cross-site' && !isReadNavigation(request)) {
+    return 'cross-site'
+  }
   // Origin fence: when a browser attaches an Origin it must be this authority.
   // Absent Origin is fine — the Host fence already bound the request, and the
   // native client sends none. The literal "null" is an opaque origin.

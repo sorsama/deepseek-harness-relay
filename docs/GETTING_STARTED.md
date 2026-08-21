@@ -134,28 +134,16 @@ That is weaker than a real credential and the relay treats it that way — priva
 
 ## Where the relay's settings are
 
-**Not in the harness Settings page.** That tab lists the settings namespaces
-that have a registered card, and the relay ships no browser plugin, so it
-registers none. Two reasons, both measured rather than assumed:
+**Settings → Plugins → Plugin configuration**, as a **Relay** card beside Shell
+and Web search. It carries the switches — remote configuration access, the
+corner link, mDNS — and links to the pages that carry the operations.
 
-- A package that declares `dsh.client` and whose `lib/client.js` is missing
-  makes `ClientModuleRegistry` throw, and that failure is fatal to the whole
-  boot — `dsh web` exits with `client-modules: 1 client package failed to
-  compose` and **no web UI starts at all, loopback included**. A git install
-  whose build script pnpm declined to run produces exactly that state. A
-  settings tab is not worth putting your harness one failed build away from
-  not starting.
-- It would not work from a phone regardless. `ui-settings` builds its store as
-  `connection.isLoopback ? 'host' : 'memory'`, and `isLoopback` is computed in
-  the browser from `location.hostname` — the relay's server-side `Host`
-  rewrite is invisible to it, so the card would render nothing on the remote
-  devices this plugin exists for.
-
-Publishing to npm with `lib/` prebuilt removes the first risk, and a card may
-follow once that is the install route.
-
-Its pages are its own, and a **Relay** link in the bottom-right corner of the
-harness UI goes to them:
+The card appears only on the machine running the harness. That is not a choice
+this plugin makes: the harness serves its settings namespaces to a loopback
+browser only, deciding from `location.hostname` on the page itself, so a remote
+browser is dispatched no cards at all. Pairing, the device list, the
+certificate pin, and the password therefore live on the relay's own pages
+instead, which work from any device and before anyone has signed in:
 
 | Page | What it does |
 |---|---|
@@ -164,7 +152,8 @@ harness UI goes to them:
 | `/relay/password` | set or change the password |
 | `/relay/health` | liveness, no authentication |
 
-Turn the link off with `uiLink: false` if you would rather not have it.
+A small **Relay** link in the bottom-right corner of the harness UI reaches
+them. Turn it off with `uiLink: false`.
 
 ## Changing settings
 
@@ -240,7 +229,7 @@ Removing the plugin leaves `~/.dsh/relay/` in place — delete that directory to
 
 **The relay let me straight into the chat without asking for a password.** Expected, if you opened it on the machine running the harness — loopback is the operator. Set the password at `/relay/password` and check it from another device.
 
-**I can't find the relay in the harness Settings page.** It is not there by design — see [Where the relay's settings are](#where-the-relays-settings-are). Use the **Relay** link in the bottom-right corner, or go to `/relay/devices`.
+**I can't find the relay in the harness Settings page.** Settings → Plugins → Plugin configuration, and only from the machine running the harness — the harness serves settings to a loopback browser only. From a phone, use the **Relay** link in the corner or go to `/relay/devices`.
 
 **Your phone cannot reach the address the relay printed.** It prints every adapter, and a virtual one (`192.168.56.x` is VirtualBox's default) is not routable from your phone. Use the address on the same network your phone is on.
 
