@@ -181,6 +181,12 @@ Forward the relay's port, not the harness's. Then:
 - Leave `compat.addressGrants` off. Behind carrier NAT a public address is shared with strangers, and the relay refuses to grant one anyway.
 - Consider `privilegedMethods: loopback-only`.
 
+**Do not put Funnel, Serve, nginx, or Caddy in front of `http://127.0.0.1:3443`.** Those proxies connect from loopback, and loopback is the operator: the relay will not ask for a password or a device token. Point the proxy at a non-loopback address this process is listening on (the Tailscale IP, or a VPC address), keep `bind: 0.0.0.0`, and drop `:3443` on the public NIC so that address is not a second door.
+
+Acceptance: unauthenticated `GET /` through the public URL must be **403**. **200** harness HTML means the proxy is coming from loopback.
+
+Funnel HTTPS terminates TLS at the edge. Run `tls: off` behind it. The QR from `http://127.0.0.1:3443/relay/pair` encodes that loopback origin; pair from outside by typing the public `https://` name, not by scanning that QR. See [#1](https://github.com/sorsama/deepseek-harness-relay/issues/1).
+
 ## Security model
 
 Read `docs/SECURITY.md` for the full statement. The short version: **signing in grants the same power as a shell on the host machine**, because the agent runs commands there. Everything in this plugin follows from that.
