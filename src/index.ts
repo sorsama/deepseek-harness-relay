@@ -29,7 +29,7 @@ import { Authenticator } from './auth/index.ts'
 import { assertCoherent, Config } from './config.ts'
 import { injectRelayLink } from './badge.ts'
 import { assertTrustedAuthority, localAddresses, relayAuthorities } from './fence.ts'
-import { HarnessSession } from './harness-session.ts'
+import { HarnessSessionProvider } from './harness-session.ts'
 import { advertise } from './mdns.ts'
 import { relayStateDir } from './paths.ts'
 import { installSettingsSection } from './settings-section.ts'
@@ -206,13 +206,14 @@ async function start(
   // Harness 0.1.2 authenticates its whole `/api` surface, and the relay strips
   // the client's own cookie on the way upstream — so without a session of its
   // own every proxied request is answered 401. An older harness keeps no such
-  // secret, and needs none; that is the only case where this is absent.
-  const session = await HarnessSession.load(ctx)
-  if (session === undefined) {
+  // secret, and needs none; that is the only case where this stays absent.
+  const session = new HarnessSessionProvider(ctx, () => {
+    log.info('harness browser-session secret found; proxied requests are now authenticated')
+  })
+  if (!await session.refresh()) {
     log.info(
-      'no harness browser-session secret found; forwarding unauthenticated. That is correct for a '
-      + 'harness before 0.1.2. On 0.1.2 or later every proxied request will be answered 401 — '
-      + 'start `dsh web` once so it creates the secret, then reload this plugin.',
+      'no harness browser-session secret found at startup; each proxied request loads it once it '
+      + 'exists. A harness before 0.1.2 requires none.',
     )
   }
 

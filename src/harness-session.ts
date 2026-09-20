@@ -140,3 +140,64 @@ export class HarnessSession {
     return `${cookieName(authority)}=v1.${body}.${signature}`
   }
 }
+
+/** Supplies the harness browser session a forwarded request presents. */
+export interface HarnessSessionSource {
+  /**
+   * The `Cookie` header value for [authority], or undefined while no secret
+   * exists. A source that has not loaded one loads it here rather than making
+   * the caller wait for a reload.
+   * @param authority - the upstream `host:port` this request will carry.
+   * @returns one `name=value` pair, or undefined when unauthenticated.
+   */
+  cookieFor(authority: string): Promise<string | undefined>
+}
+
+/**
+ * The relay's live handle on the harness browser session.
+ *
+ * The secret can appear after this plugin applies: the credential service may
+ * activate later, and on a harness home that never served the web profile the
+ * Connection that mints the record has not run yet. The session is therefore
+ * resolved from the request path instead of read once at startup, so the first
+ * request after the secret exists already carries it and no reload or retry
+ * cycle is needed.
+ */
+export class HarnessSessionProvider implements HarnessSessionSource {
+  #session: HarnessSession | undefined
+
+  /**
+   * @param ctx - plugin context; `ctx.credentials` is the harness's own store.
+   * @param onAvailable - called once, when the secret first loads.
+   */
+  constructor(private readonly ctx: Context, private readonly onAvailable: () => void = () => {}) {}
+
+  /** Whether a loaded session authenticates every forwarded request. */
+  get available(): boolean {
+    return this.#session !== undefined
+  }
+
+  /**
+   * Load the secret if it exists now.
+   * @returns true once a session is loaded.
+   */
+  async refresh(): Promise<boolean> {
+    const found = this.#session ?? await HarnessSession.load(this.ctx)
+    if (this.#session === undefined && found !== undefined) {
+      this.#session = found
+      this.onAvailable()
+    }
+    return this.#session !== undefined
+  }
+
+  /**
+   * The `Cookie` header value for [authority], loading the secret when it is
+   * not loaded yet.
+   * @param authority - the upstream `host:port` this request will carry.
+   * @returns one `name=value` pair, or undefined when unauthenticated.
+   */
+  async cookieFor(authority: string): Promise<string | undefined> {
+    if (this.#session === undefined) await this.refresh()
+    return this.#session?.cookieFor(authority)
+  }
+}

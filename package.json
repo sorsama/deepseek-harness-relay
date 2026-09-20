@@ -58,9 +58,11 @@
   "scripts": {
     "build": "tsc -b && tsdown",
     "prepare": "node scripts/prepare.mjs",
+    "prepack": "pnpm run build",
     "typecheck": "tsc -b --pretty",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:pack": "node scripts/verify-pack.mjs",
     "lint": "oxlint src tests"
   },
   "engines": {

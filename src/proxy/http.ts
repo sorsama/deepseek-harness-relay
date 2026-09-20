@@ -9,7 +9,7 @@
 
 import { request as httpRequest } from 'node:http'
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import type { HarnessSession } from '../harness-session.ts'
+import type { HarnessSessionSource } from '../harness-session.ts'
 import { downstreamHeaders, upstreamHeaders } from './rewrite.ts'
 
 /** What the forwarder needs to reach the harness. */
@@ -21,14 +21,13 @@ export interface UpstreamTarget {
   /** Deadline for the upstream response to begin. */
   readonly timeoutMs: number
   /**
-   * Mints the harness browser session each forwarded request carries.
+   * Supplies the harness browser session each forwarded request carries.
    *
    * Absent against a harness older than 0.1.2, which required none. Against
-   * 0.1.2 and later its absence means every proxied request is answered 401,
-   * which the relay reports at startup rather than leaving to be discovered
-   * one refused request at a time.
+   * 0.1.2 and later a source whose secret is not loaded yet leaves the request
+   * unauthenticated; the source retries from the request path.
    */
-  readonly session?: HarnessSession | undefined
+  readonly session?: HarnessSessionSource | undefined
 }
 
 /** The authority the harness sees, and compares its own fence against. */
@@ -43,16 +42,16 @@ export function loopbackAuthority(target: UpstreamTarget): string {
  * @param target - the loopback harness.
  * @returns resolution once the response is finished or an error was reported.
  */
-export function forward(req: IncomingMessage, res: ServerResponse, target: UpstreamTarget): Promise<void> {
-  return new Promise((resolve) => {
+export async function forward(req: IncomingMessage, res: ServerResponse, target: UpstreamTarget): Promise<void> {
+  const authority = loopbackAuthority(target)
+  const cookie = await target.session?.cookieFor(authority)
+  await new Promise<void>((resolve) => {
     const upstream = httpRequest({
       host: target.host,
       port: target.port,
       method: req.method ?? 'GET',
       path: req.url ?? '/',
-      headers: upstreamHeaders(req.headers, loopbackAuthority(target), {
-        cookie: target.session?.cookieFor(loopbackAuthority(target)),
-      }),
+      headers: upstreamHeaders(req.headers, authority, { cookie }),
       // Each proxied request gets its own socket rather than sharing the
       // global agent's pool, so one stalled streaming response cannot hold a
       // slot another request is waiting for.

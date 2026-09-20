@@ -1,5 +1,27 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- **A publish could ship a runtime older than its sources.** `prepare` skips the
+  build whenever `lib/` already exists, so publishing from a working tree whose
+  bundles predated a source change packed the stale `lib/index.js` beside the
+  new declarations. The 0.2.1 npm tarball went out that way: it has no
+  harness-session minting, so every request it proxies to a harness 0.1.2 or
+  later is answered 401. `prepack` now rebuilds both halves before packing, and
+  `pnpm test:pack` poisons the runtime, packs, and reads the bytes inside the
+  tarball to keep it that way.
+
+- **A relay that started before the harness session existed stayed anonymous.**
+  The secret was read once, while the plugin applied, so a boot where the
+  credential service activated later — or a harness home that had never served
+  the web profile, where the Connection had not minted the record yet — left
+  every proxied request answered 401 until a manual reload. The session is now
+  resolved from the request path: a request that finds none loads one before it
+  is forwarded, so the secret's late arrival costs neither a failed request nor
+  a reload.
+
 ## 0.2.1
 
 ### Fixed
