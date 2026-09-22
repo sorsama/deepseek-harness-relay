@@ -6,6 +6,14 @@
  * halves on its own, with no monorepo, no project references, and no
  * typecheck. A registry or tarball install already ships `lib/` and skips.
  *
+ * "Already ships `lib/`" is judged by freshness, not by existence. npm runs
+ * this script during `npm publish` too, and the existence-only check it used
+ * to make meant a checkout whose `lib/` predated a source change published the
+ * older bundle under the new version. That is how 0.2.1 reached the registry
+ * without `src/harness-session.ts` in it: the relay paired devices and then
+ * had no session of its own to present upstream, so the harness refused every
+ * proxied request with 401. One directory walk removes the whole failure mode.
+ *
  * It also fails soft, which matters more than it looks. A package that
  * declares `dsh.client` and has no `lib/client.js` makes the harness's
  * ClientModuleRegistry throw, and that failure is fatal to the entire boot:
@@ -14,18 +22,42 @@
  * from the installed manifest. The operator loses the settings card and keeps
  * a working harness, which is the right way round.
  */
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 
 const root = fileURLToPath(new URL('..', import.meta.url))
+const indexBundle = fileURLToPath(new URL('../lib/index.js', import.meta.url))
 const clientBundle = new URL('../lib/client.js', import.meta.url)
 const manifestPath = fileURLToPath(new URL('../package.json', import.meta.url))
 
-if (existsSync(new URL('../lib/index.js', import.meta.url)) && existsSync(clientBundle)) {
-  console.log('dsh-relay: lib/ already built, skipping prepare')
+/** Newest modification time under a directory, in milliseconds. */
+function newestMtime(path) {
+  let newest = 0
+  for (const entry of readdirSync(path, { withFileTypes: true })) {
+    const child = fileURLToPath(new URL(entry.name + (entry.isDirectory() ? '/' : ''), `file://${path}/`))
+    newest = Math.max(newest, entry.isDirectory() ? newestMtime(child) : statSync(child).mtimeMs)
+  }
+  return newest
+}
+
+/** Whether the shipped bundles are at least as new as everything they are built from. */
+function bundlesAreCurrent() {
+  if (!existsSync(indexBundle) || !existsSync(clientBundle)) return false
+  const built = Math.min(statSync(indexBundle).mtimeMs,
+                         statSync(fileURLToPath(clientBundle)).mtimeMs)
+  const sources = Math.max(newestMtime(fileURLToPath(new URL('../src', import.meta.url))),
+                           statSync(manifestPath).mtimeMs,
+                           statSync(fileURLToPath(new URL('../tsdown.config.ts', import.meta.url))).mtimeMs)
+  return built >= sources
+}
+
+if (bundlesAreCurrent()) {
+  console.log('dsh-relay: lib/ is newer than src/, skipping prepare')
   process.exit(0)
 }
+
+console.log('dsh-relay: lib/ is missing or older than src/, building')
 
 const built = spawnSync('tsdown', [], {
   cwd: root,

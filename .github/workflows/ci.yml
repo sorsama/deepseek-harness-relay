@@ -29,3 +29,13 @@ jobs:
       - name: the published entry points exist
         shell: bash
         run: test -f lib/index.js
+      # 0.2.1 shipped without the harness session signing: the relay paired
+      # devices and then had no session of its own to present upstream, so the
+      # harness answered every proxied request with 401 and the phone app
+      # reported the relay as refusing the device. Unit tests read src/ and
+      # cannot see this, so the built bundle is checked directly.
+      - name: the harness session signing is in the published bundle
+        shell: bash
+        run: |
+          grep -q 'client-connection/browser-session' lib/index.js
+          grep -q 'dsh-auth-' lib/index.js

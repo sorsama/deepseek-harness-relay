@@ -58,6 +58,7 @@
   "scripts": {
     "build": "tsc -b && tsdown",
     "prepare": "node scripts/prepare.mjs",
+    "prepublishOnly": "pnpm build",
     "typecheck": "tsc -b --pretty",
     "test": "vitest run",
     "test:watch": "vitest",
