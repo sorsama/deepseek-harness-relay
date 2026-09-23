@@ -159,6 +159,49 @@ describe('the devices page', () => {
   }, 20_000)
 })
 
+describe('two rows for one phone can be told apart', () => {
+  /** Enrol one device whose name, address, and id are pinned by the caller. */
+  async function enrol(id: string, createdAt: number, lastSeenAt?: number): Promise<void> {
+    await store.update((draft) => {
+      draft.devices[id] = {
+        id,
+        name: 'samsung SM-S731B',
+        tokenHash: `hash-${id}`,
+        createdAt,
+        expiresAt: createdAt + 30 * 24 * 60 * 60 * 1000,
+        ...lastSeenAt !== undefined && { lastSeenAt, lastAddress: '192.168.0.85' },
+      }
+    })
+  }
+
+  it('says when each device was paired, next to when it was last seen', async () => {
+    // Two pairings of one handset, two hours apart, the stale one never used:
+    // every other column on the page reads the same for both rows.
+    const now = Date.now()
+    const older = now - 2 * 60 * 60 * 1000
+    await enrol('aaaaaaaa1111', older, older)
+    await enrol('bbbbbbbb2222', now)
+
+    const answer = await get('/relay/devices')
+    expect(answer.status).toBe(200)
+    expect(answer.body).toContain('paired 2 h ago')
+    expect(answer.body).toContain('paired just now')
+    expect(answer.body).toContain('last seen 2 h ago')
+    expect(answer.body).toContain('last seen never')
+  })
+
+  it('shows a short tail of each id, so equal names are distinguishable', async () => {
+    const now = Date.now()
+    await enrol('aaaaaaaa1111', now, now)
+    await enrol('bbbbbbbb2222', now, now)
+
+    const answer = await get('/relay/devices')
+    expect(answer.body.match(/samsung SM-S731B/g)).toHaveLength(2)
+    expect(answer.body).toContain('>1111<')
+    expect(answer.body).toContain('>2222<')
+  })
+})
+
 describe('the link into the harness UI', () => {
   it('injects one anchor before the closing body tag', () => {
     const injected = injectRelayLink('<!doctype html><html><body><div id="root"></div></body></html>')
