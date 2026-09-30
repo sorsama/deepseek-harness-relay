@@ -4,7 +4,9 @@
  * clock step is the realistic way an expiry check goes wrong, not two-party
  * skew.
  */
+import { randomBytes } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
+import { HarnessSession } from '../src/harness-session.ts'
 import {
   constantTimeEqual,
   hashToken,
@@ -94,5 +96,60 @@ describe('constantTimeEqual', () => {
     expect(constantTimeEqual('abc', 'abc')).toBe(true)
     expect(constantTimeEqual('abc', 'abd')).toBe(false)
     expect(constantTimeEqual('abc', 'abcd')).toBe(false)
+  })
+})
+
+describe('HarnessSessionResolver', () => {
+  it('never memoizes a miss, so a cold start heals once the secret appears', async () => {
+    // The bug this pins: the relay mounts before `dsh-client-connection` has
+    // written its signing secret. Reading once and caching the miss left the
+    // process forwarding unauthenticated forever — the relay's own pages worked
+    // and every proxied request was answered 401, for the life of the process.
+    const secret = randomBytes(32)
+    let stored: unknown
+    const ctx = {
+      get: (name: string) => (name === 'credentials'
+        ? { readRecord: async () => stored }
+        : undefined),
+    } as unknown as Parameters<typeof HarnessSession.lazy>[0]
+
+    const resolver = HarnessSession.lazy(ctx)
+    expect(await resolver.current()).toBeUndefined()
+    expect(resolver.ready).toBe(false)
+    expect(resolver.sync()).toBeUndefined()
+
+    // The harness writes the secret after the relay has already started.
+    stored = {
+      kind: 'grant',
+      payload: { version: 1, secret: secret.toString('base64url') },
+    }
+    const recovered = await resolver.current()
+    expect(recovered).toBeDefined()
+    expect(resolver.ready).toBe(true)
+    // The request path reads this synchronously, so it must see the recovery.
+    expect(resolver.sync()).toBe(recovered)
+    expect(resolver.markRecovered()).toBe(true)
+    expect(resolver.markRecovered()).toBe(false)
+  })
+
+  it('picks up a rotated secret instead of freezing the first one', async () => {
+    const first = randomBytes(32)
+    const second = randomBytes(32)
+    let stored: unknown = {
+      kind: 'grant',
+      payload: { version: 1, secret: first.toString('base64url') },
+    }
+    const ctx = {
+      get: () => ({ readRecord: async () => stored }),
+    } as unknown as Parameters<typeof HarnessSession.lazy>[0]
+
+    const resolver = HarnessSession.lazy(ctx)
+    const one = await resolver.current()
+    expect(one?.cookieFor('127.0.0.1:3080')).toContain('v1.')
+
+    stored = { kind: 'grant', payload: { version: 1, secret: second.toString('base64url') } }
+    const two = await resolver.current()
+    expect(two).not.toBe(one)
+    expect(resolver.sync()).toBe(two)
   })
 })
