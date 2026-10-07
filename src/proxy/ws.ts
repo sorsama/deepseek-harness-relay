@@ -100,7 +100,7 @@ export function forwardUpgrade(
     // client as a stream that would not open rather than as a 401 it can read.
     headers: upstreamHeaders(req.headers, loopbackAuthority(target), {
       keepUpgrade: true,
-      cookie: target.session?.cookieFor(loopbackAuthority(target)),
+      cookie: target.session()?.cookieFor(loopbackAuthority(target)),
     }),
     agent: false,
   })

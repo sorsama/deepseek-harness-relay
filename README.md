@@ -7,6 +7,24 @@ Authenticated remote access for a [DeepSeek Harness](https://github.com/deepseek
 
 Built on DeepSeek Harness. Not an official DeepSeek project.
 
+## Supported harness versions
+
+This release targets harness **0.1.7** (session format 4). The settings card and
+its live configuration follow depend on 0.1.7 APIs, so use `dsh-relay@0.2` on
+harness 0.1.5 and `dsh-relay@0.3` on 0.1.7. The relay's proxying, pairing, and
+device revocation work on both.
+
+Two things about 0.1.7 are counter-intuitive enough to be worth stating, because
+each fails **silently** — and a working relay with no configuration page is the
+symptom:
+
+- The settings namespace **is** the loader entry id (`relay`). A plugin whose
+  schema does not ride the default export contributes no namespace at all, and
+  nothing logs.
+- Form fields must be `.volatile()`. A schema without it produces no page rather
+  than an empty one.
+
+
 ## Why this exists
 
 The harness serves its browser API on loopback and is explicit about what it does not do:

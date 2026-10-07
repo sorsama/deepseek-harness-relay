@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { Authenticator } from '../src/auth/index.ts'
-import { Config, assertCoherent, type Config as RelayConfig } from '../src/config.ts'
+import { Config, assertCoherent, plainConfig, type Config as RelayConfig } from '../src/config.ts'
 import { RelayStore } from '../src/state.ts'
 
 const NOW = 1_700_000_000_000
@@ -15,9 +15,17 @@ const NOW = 1_700_000_000_000
 let dir: string
 let store: RelayStore
 
-/** A resolved config with the schema's own defaults applied. */
+/**
+ * A resolved config, in the plain values the plugin consumes.
+ *
+ * The schema resolves every `.volatile()` field to a live handle (see
+ * `plainConfig`), so a test that used the schema's raw output would be handing
+ * the plugin handles where it expects values. Going through `plainConfig` is
+ * what the plugin itself does, and it is the only way these assertions are
+ * about the relay's behaviour rather than about schemastery's.
+ */
 function configFor(overrides: Partial<RelayConfig> = {}): RelayConfig {
-  return Config({ stateDir: dir, ...overrides }) as RelayConfig
+  return plainConfig(Config({ stateDir: dir, ...overrides }) as Parameters<typeof plainConfig>[0])
 }
 
 beforeEach(async () => {
