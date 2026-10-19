@@ -2,7 +2,8 @@
 
 ## 0.3.1
 
-Harness **0.2.1** support. Compatibility release: no relay behaviour changed.
+Harness **0.2.1** support, and the relay no longer orphans paired devices when
+the set of addresses its self-signed certificate covers changes at start.
 
 DSH 0.2.1 refuses to start a plugin whose declared peer ranges do not admit the
 running harness. The 0.3.0 ranges stopped at `<0.2.1-0`, so 0.2.1-rc.2 stayed
@@ -18,20 +19,6 @@ installed but was denied at profile startup — the relay never bound a port.
   typecheck run against the release it claims. `@deepseek-ai/dsh-client-runtime`
   was dropped: 0.2.1 no longer publishes it, and the browser half never imported
   it.
-
-### Verified on 0.2.1-rc.2
-
-- Profile boot: the relay binds, logs
-  `harness browser session is available; proxied requests now authenticate`,
-  and `/relay/health` answers `200` with `{"service":"dsh-relay","ok":true}`.
-- 121 tests, typecheck, and build pass against 0.2.1-rc.2. A new
-  `tests/compat.spec.ts` pins the peer ranges in both directions: every
-  verified harness release is admitted, and the next untested minor is refused.
-
-## Unreleased
-
-### Fixed
-
 - **A changed address set no longer orphans paired devices.** When the set of
   local addresses covered by the self-signed certificate changed at start — a
   VPN disconnecting, an IP moving — the relay re-issued with a *new* key.
@@ -43,6 +30,14 @@ installed but was denied at profile startup — the relay never bound a port.
   when only the covered addresses moved, so the next start does not re-issue
   for nothing.
 
+### Verified on 0.2.1-rc.2
+
+- Profile boot: the relay binds, logs
+  `harness browser session is available; proxied requests now authenticate`,
+  and `/relay/health` answers `200` with `{"service":"dsh-relay","ok":true}`.
+- 125 tests, typecheck, and build pass against 0.2.1-rc.2. A new
+  `tests/compat.spec.ts` pins the peer ranges in both directions: every
+  verified harness release is admitted, and the next untested minor is refused.
 
 ## 0.3.0
 
