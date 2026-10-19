@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- **A changed address set no longer orphans paired devices.** When the set of
+  local addresses covered by the self-signed certificate changed at start — a
+  VPN disconnecting, an IP moving — the relay re-issued with a *new* key.
+  Clients pin the SHA-256 of the key's SPKI, so every paired device hard-failed
+  as a certificate change until re-paired (the 2026-10-19 phone outage,
+  dsh-mobile issue #114). Re-issuance now reuses the stored key — a new
+  certificate on the same identity — and only a first boot, with no key on
+  disk, mints a new one. The cert record in the relay state now also persists
+  when only the covered addresses moved, so the next start does not re-issue
+  for nothing.
+
+
 ## 0.2.1
 
 ### Fixed
