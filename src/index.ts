@@ -221,7 +221,13 @@ async function start(
     sans,
     existing: store.state.certificate,
   })
-  if (material !== undefined && material.record.fingerprint !== store.state.certificate?.fingerprint) {
+  // A same-key re-issue keeps the fingerprint but moves the covered
+  // addresses (issue #114); persist the record when either field changed,
+  // or the next start re-issues for nothing and the record stays stale.
+  const previousCertificate = store.state.certificate
+  if (material !== undefined
+    && (material.record.fingerprint !== previousCertificate?.fingerprint
+      || material.record.sans.join(',') !== previousCertificate?.sans.join(','))) {
     await store.update((draft) => { draft.certificate = material.record })
   }
 
