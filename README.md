@@ -9,14 +9,14 @@ Built on DeepSeek Harness. Not an official DeepSeek project.
 
 ## Supported harness versions
 
-This release targets harness **0.1.7** (session format 4). The settings card and
-its live configuration follow depend on 0.1.7 APIs, so use `dsh-relay@0.2` on
-harness 0.1.5 and `dsh-relay@0.3` on 0.1.7. The relay's proxying, pairing, and
-device revocation work on both.
+This release targets harness **0.2.1** (session format 4). The settings card and
+its live configuration follow depend on the 0.1.7+ settings plane, so use
+`dsh-relay@0.2` on harness 0.1.5 and `dsh-relay@0.3` on 0.1.7 through 0.2.1.
+The relay's proxying, pairing, and device revocation work across all of them.
 
-Two things about 0.1.7 are counter-intuitive enough to be worth stating, because
-each fails **silently** — and a working relay with no configuration page is the
-symptom:
+Two things about the 0.1.7+ settings plane are counter-intuitive enough to be
+worth stating, because each fails **silently** — and a working relay with no
+configuration page is the symptom:
 
 - The settings namespace **is** the loader entry id (`relay`). A plugin whose
   schema does not ride the default export contributes no namespace at all, and

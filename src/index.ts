@@ -255,6 +255,17 @@ async function start(
     )
   }
 
+  // The 0.2.1 web server widened `port` to `number | undefined` (a zero
+  // config asks the OS for a port, unknown until `listen` binds). The relay
+  // proxies to one concrete port, so a mount that precedes the bind is a
+  // harness ordering change to fail loudly about, not forward nowhere.
+  if (ctx.webServer.port === undefined) {
+    throw new Error(
+      'dsh-relay: the harness web server has not bound a port yet, so the relay has no upstream '
+      + 'to proxy to. This is a mount-ordering change, not a configuration error.',
+    )
+  }
+
   const runtime: RelayRuntime = {
     auth,
     config,
