@@ -1,26 +1,26 @@
 /**
- * The relay's card on the harness's **Plugins** page.
+ * The relay's configuration page on the harness's **Plugins** page.
  *
  * What belongs here and what does not: pairing, revocation, and the
  * certificate pin live on the relay's own pages, because they must work before
- * a person is signed in and from a device that is not this one. This card is
+ * a person is signed in and from a device that is not this one. This page is
  * the configuration surface — the switches that change how the relay behaves —
  * plus the way in to those pages.
  *
- * **The platform draws the card.** On dsh 0.1.7 the Plugins page supplies the
- * title button, the disclosure chevron, and the frame, and asks this component
- * for two things only: a one-liner when `view` is `summary`, and the form body
- * when it is `page` — which is `SettingsForm` plus the fields. Drawing an outer
- * `<li>` with its own header here, as the 0.1.5 card did, produces a doubled
- * card whose inner button sits over the platform's and swallows its clicks.
+ * **The platform draws the frame.** The Plugins page heads the row's page with
+ * the plugin's title and description and asks this component for two things
+ * only: a one-liner when `view` is `summary`, and the form body when it is
+ * `page` — `SettingsForm` plus the fields. Drawing an outer card with its own
+ * header here, as the 0.1.5 card did, produces a doubled frame whose inner
+ * button sits over the platform's and swallows its clicks.
  *
- * The card is only ever rendered on loopback. The harness decides whether a
- * settings namespace is writable from `connection.isLoopback`, computed in the
+ * The page is only ever rendered on loopback. The harness decides whether a
+ * settings namespace is served from `connection.isLoopback`, computed in the
  * browser from the page address, so a remote browser is served no namespaces
- * and this page dispatches no cards at all. The snapshot's `writable` flag is
- * what that looks like from in here.
+ * and the row offers no configure control there. The snapshot's `writable`
+ * flag is what a read-only deployment looks like from in here.
  *
- * Edits are staged and written on save, as the neighbouring cards do. That is
+ * Edits are staged and written on save, as the neighbouring pages do. That is
  * not only for consistency: saving a relay field rebinds the listeners and
  * drops the connections in flight, so a control that committed as it settled
  * turned one change of mind into several disconnections.
@@ -39,12 +39,11 @@ interface Field {
 }
 
 /**
- * The fields the card edits, in the order a person reasons about them.
+ * The free-text and number fields, in the order a person reasons about them.
  *
- * These must stay in step with the specs the client half registers on the form
- * model: a field with a control but no spec renders, accepts typing, and then
- * silently refuses to save, because the model plans its writes from the specs
- * and not from what is on screen.
+ * These and the switches below must stay in step with the specs the client
+ * half registers on the form model: staging a field the model has no spec for
+ * throws on the next projection, which takes the whole page down.
  */
 const FIELDS: readonly Field[] = [
   {
@@ -73,9 +72,11 @@ const FIELDS: readonly Field[] = [
   },
 ]
 
-/** One switch the card offers, as a segmented control over a string field. */
+/** One switch the page offers, as a segmented control over a staged field. */
 interface Choice {
-  readonly field: string
+  readonly field: 'privilegedMethods' | 'uiLink' | 'mdns'
+  /** What the field resolves to when the section carries no value of its own. */
+  readonly fallback: string
   readonly label: string
   readonly hint: string
   readonly options: readonly { readonly value: string, readonly label: string }[]
@@ -85,6 +86,7 @@ interface Choice {
 const CHOICES: readonly Choice[] = [
   {
     field: 'privilegedMethods',
+    fallback: 'allow-authenticated',
     label: 'Configuration access for remote clients',
     hint: 'The harness serves settings, credentials, model discovery, and its directory pickers only to the machine it runs on. This decides whether an authenticated remote client reaches them too. Clients admitted by network address never do.',
     options: [
@@ -94,12 +96,14 @@ const CHOICES: readonly Choice[] = [
   },
   {
     field: 'uiLink',
+    fallback: 'true',
     label: 'Relay link in this UI',
     hint: 'The small link in the corner that reaches the relay pages.',
     options: [{ value: 'true', label: 'Shown' }, { value: 'false', label: 'Hidden' }],
   },
   {
     field: 'mdns',
+    fallback: 'true',
     label: 'Announce on the local network',
     hint: 'Publishes _dsh._tcp so a client can find this relay without scanning the subnet.',
     options: [{ value: 'true', label: 'Announced' }, { value: 'false', label: 'Quiet' }],
@@ -141,6 +145,9 @@ export interface RelayCardState extends Shell {
   readonly port: FieldState
   readonly proxyTimeoutMs: FieldState
   readonly rateLimitPerMinute: FieldState
+  readonly privilegedMethods: FieldState
+  readonly uiLink: FieldState
+  readonly mdns: FieldState
 }
 
 /** Props the renderer composes for this card. */
@@ -160,19 +167,19 @@ export interface RelayCardProps {
 }
 
 /**
- * Render the value currently in effect for one choice.
+ * The option a switch shows as selected: the staged draft when there is one,
+ * the stored value otherwise, and the schema default when neither exists.
  * @param choice - the switch being read.
- * @param value - the staged section value.
+ * @param state - the page's projection.
  * @returns the option string the control should show as selected.
  */
-function currentChoice(choice: Choice, value: RelayValue | undefined): string {
-  if (choice.field === 'privilegedMethods') return value?.privilegedMethods ?? 'allow-authenticated'
-  if (choice.field === 'uiLink') return String(value?.uiLink ?? true)
-  return String(value?.mdns ?? true)
+function currentChoice(choice: Choice, state: RelayCardState): string {
+  const text = state[choice.field].text
+  return text === '' ? choice.fallback : text
 }
 
 /**
- * Render the relay's configuration card.
+ * Render the relay's configuration page.
  * @param props - the bound snapshot hook and the form actions.
  * @returns the one-liner or the form; the platform supplies the frame.
  */
@@ -251,7 +258,7 @@ export function RelayCard(props: RelayCardProps) {
           <span className={css.label}>{choice.label}</span>
           <div className={css.segmented} role="group" aria-label={choice.label}>
             {choice.options.map((option) => {
-              const on = option.value === currentChoice(choice, value)
+              const on = option.value === currentChoice(choice, state)
               return (
                 <button
                   type="button"
