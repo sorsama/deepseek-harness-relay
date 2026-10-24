@@ -90,7 +90,15 @@ export function forwardUpgrade(
   target: UpstreamTarget,
   ledger: SocketLedger,
 ): void {
-  void startUpgrade(req, socket, head, target, ledger)
+  // The session is read before the upstream opens, so the client socket waits
+  // a moment with nothing listening for its errors — and an unheard 'error'
+  // event, like an unhandled rejection, takes the whole harness process down
+  // rather than this one socket. Both are caught here.
+  const early = (): void => { socket.destroy() }
+  socket.on('error', early)
+  startUpgrade(req, socket, head, target, ledger, early).catch(() => {
+    if (!socket.destroyed) rejectUpgrade(socket, 502, 'Bad Gateway')
+  })
 }
 
 /**
@@ -103,6 +111,7 @@ export function forwardUpgrade(
  * @param head - bytes the client already sent past the handshake.
  * @param target - the loopback harness.
  * @param ledger - registry the established socket pair joins.
+ * @param early - the provisional error listener, replaced once the upstream opens.
  */
 async function startUpgrade(
   req: IncomingMessage,
@@ -110,6 +119,7 @@ async function startUpgrade(
   head: Buffer,
   target: UpstreamTarget,
   ledger: SocketLedger,
+  early: () => void,
 ): Promise<void> {
   const authority = loopbackAuthority(target)
   const cookie = await target.session?.cookieFor(authority)
@@ -132,6 +142,7 @@ async function startUpgrade(
   }
 
   socket.on('error', abandon)
+  socket.removeListener('error', early)
   upstream.on('error', () => {
     if (!socket.destroyed) rejectUpgrade(socket, 502, 'Bad Gateway')
     upstream.destroy()

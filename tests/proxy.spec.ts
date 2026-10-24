@@ -16,7 +16,7 @@ import { join } from 'node:path'
 import type { Duplex } from 'node:stream'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { Authenticator } from '../src/auth/index.ts'
-import { HarnessSession } from '../src/harness-session.ts'
+import { HarnessSession, type HarnessSessionSource } from '../src/harness-session.ts'
 import { Config, plainConfig, type Config as RelayConfig } from '../src/config.ts'
 import { startListener, type RelayListener, type RelayRuntime } from '../src/server.ts'
 import { RelayStore } from '../src/state.ts'
@@ -123,7 +123,12 @@ function rawUpgrade(port: number, path: string, host: string): Promise<string> {
   })
 }
 
-async function startRelay(overrides: Partial<RelayConfig> = {}): Promise<void> {
+/** The session a fixture relay presents: the real minter over a fixed secret. */
+const FIXTURE_SESSION: HarnessSessionSource = {
+  cookieFor: async authority => HarnessSession.forTesting(SESSION_SECRET).cookieFor(authority),
+}
+
+async function startRelay(overrides: Partial<RelayConfig> = {}, session: HarnessSessionSource = FIXTURE_SESSION): Promise<void> {
   const config = plainConfig(Config({ stateDir: dir, port: 0, tls: 'off', mdns: false, ...overrides }) as Parameters<typeof plainConfig>[0])
   auth = new Authenticator(store, config)
   const runtime: RelayRuntime = {
@@ -134,7 +139,7 @@ async function startRelay(overrides: Partial<RelayConfig> = {}): Promise<void> {
       port: upstreamPort,
       timeoutMs: 5000,
       // Asked per request, as the live resolver is.
-      session: { cookieFor: async authority => HarnessSession.forTesting(SESSION_SECRET).cookieFor(authority) },
+      session,
     },
     log: () => undefined,
   }
@@ -239,6 +244,47 @@ describe('http forwarding', () => {
     const authority = `127.0.0.1:${String(upstreamPort)}`
     const name = 'dsh-auth-' + createHash('sha256').update(authority).digest('base64url')
     expect(String(seen.headers?.cookie ?? '')).toContain(`${name}=v1.`)
+  })
+
+  it('answers 502 to an upgrade whose session read fails, and keeps serving', async () => {
+    await relay.close()
+    await startRelay({}, { cookieFor: () => Promise.reject(new Error('store gone')) })
+    const answer = await rawUpgrade(relay.port, '/api/remote.mux', 'relay.test')
+    expect(answer).toContain('502')
+    // Still listening: the failure cost one socket, not the process.
+    const after = await rawRequest(relay.port, ['GET /relay/health HTTP/1.1', 'Host: relay.test', 'Connection: close'])
+    expect(after).toContain('200 OK')
+  })
+
+  it('survives a client that resets while its upgrade waits on the session', async () => {
+    // The session read leaves the client socket briefly without the
+    // forwarder's error listener; an unheard 'error' would take the process
+    // down rather than the socket.
+    await relay.close()
+    await startRelay({}, {
+      cookieFor: async (authority) => {
+        await new Promise(resolve => setTimeout(resolve, 100))
+        return HarnessSession.forTesting(SESSION_SECRET).cookieFor(authority)
+      },
+    })
+    await new Promise<void>((resolve) => {
+      const socket = connect(relay.port, '127.0.0.1', () => {
+        socket.write([
+          'GET /api/remote.mux HTTP/1.1',
+          'Host: relay.test',
+          'Upgrade: websocket',
+          'Connection: Upgrade',
+          `Sec-WebSocket-Key: ${randomBytes(16).toString('base64')}`,
+          'Sec-WebSocket-Version: 13',
+          '', '',
+        ].join('\r\n'))
+        setTimeout(() => { socket.resetAndDestroy(); resolve() }, 20)
+      })
+      socket.on('error', () => undefined)
+    })
+    await new Promise(resolve => setTimeout(resolve, 200))
+    const after = await rawRequest(relay.port, ['GET /api/echo HTTP/1.1', 'Host: relay.test', 'Connection: close'])
+    expect(after).toContain('200 OK')
   })
 
   it('refuses an untrusted Host before anything reaches the harness', async () => {
