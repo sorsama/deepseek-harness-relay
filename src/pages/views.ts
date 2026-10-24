@@ -18,6 +18,24 @@
 import type { DeviceRecord } from '../state.ts'
 import { escapeHtml, page } from './layout.ts'
 
+/** Hex digits of a device id shown next to its name. */
+const DEVICE_ID_SUFFIX = 4
+
+/**
+ * The tail of a device id, for telling two rows of the same name apart.
+ *
+ * The name is deliberately the phone's own model — that is what a person
+ * recognises when deciding what to revoke — so two pairings from one handset
+ * produce two rows that read identically until the address or the last-seen
+ * time differs. The suffix is not a credential and is not accepted as one: the
+ * row's revoke form still carries the whole id.
+ * @param id - the device id.
+ * @returns the last few characters of the id.
+ */
+function shortId(id: string): string {
+  return id.slice(-DEVICE_ID_SUFFIX)
+}
+
 /** Render a relative timestamp the way a device list wants it. */
 function since(timestamp: number | undefined, now: number): string {
   if (timestamp === undefined) return 'never'
@@ -230,8 +248,9 @@ export function devicesPage(options: {
     : options.devices.map(device => `
     <div class="row">
       <div class="meta">
-        <span class="name">${escapeHtml(device.name)}</span>
-        <span class="sub">last seen ${escapeHtml(since(device.lastSeenAt, options.now))}${
+        <span class="name">${escapeHtml(device.name)} <span class="mono">${escapeHtml(shortId(device.id))}</span></span>
+        <span class="sub">paired ${escapeHtml(since(device.createdAt, options.now))} &middot; last seen ${
+          escapeHtml(since(device.lastSeenAt, options.now))}${
           device.lastAddress === undefined ? '' : ` &middot; ${escapeHtml(device.lastAddress)}`}</span>
       </div>
       <div class="end">
