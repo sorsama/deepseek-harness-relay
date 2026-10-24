@@ -2,7 +2,7 @@
 
 A walkthrough for the common setup: no `dsh` on your PATH, you start the harness with `npx`. Every command below is the `npx` form — if you do have `dsh` installed globally, drop the `npx @deepseek-ai/` prefix from all of them.
 
-Verified end to end on Windows against `@deepseek-ai/dsh@0.1.0-rc.7`.
+First written against `@deepseek-ai/dsh@0.1.0-rc.7`; the install, pairing, and settings steps were re-verified on Windows against `@deepseek-ai/dsh@0.2.1-rc.3` with dsh-relay 0.3.0. dsh-relay 0.3 needs harness 0.1.7-rc.2 or later — on an older harness, install `dsh-relay@0.2`.
 
 ## 0. Where things live
 
@@ -32,7 +32,7 @@ Open `~/.dsh/profiles/web/cordis.patch.yml`. If it contains a row like this:
 
 ```
 dsh-relay: the harness web server is bound to 0.0.0.0, so it is already
-reachable without authentication and this relay would protect nothing.
+reachable without going through this relay, which would protect nothing.
 ```
 
 If that leaves the file with nothing but comments, put an empty list in it. The loader requires a top-level YAML array, and a file of comments alone parses as `null`:
@@ -56,12 +56,14 @@ The `webserver` row should read `host: 127.0.0.1`.
 npx @deepseek-ai/dsh plugin --profile web add dsh-relay
 ```
 
+If pnpm answers `ERR_PNPM_ADDING_TO_ROOT`, add `-w` after `add`: the profile directory is a pnpm workspace root, and some pnpm versions want that said out loud.
+
 The published package ships prebuilt, so nothing compiles on your machine and no build permission is involved. It takes a few seconds. When it finishes, the profile manifest lists the bundle:
 
 ```jsonc
 // ~/.dsh/profiles/web/package.json
 {
-  "dependencies": { "dsh-relay": "^0.1.0" },
+  "dependencies": { "dsh-relay": "^0.3.0" },
   "dsh": { "profile": { "bundles": [
     "@deepseek-ai/dsh-base",
     "@deepseek-ai/dsh-web-app",
@@ -154,14 +156,16 @@ Upgrading to 0.8.0 is the better fix.
 
 ## Where the relay's settings are
 
-**Settings → Plugins → Plugin configuration**, as a **Relay** card beside Shell
-and Web search. It carries the switches — remote configuration access, the
-corner link, mDNS — and links to the pages that carry the operations.
+**Plugins → dsh-relay**, then **Configure** on the `relay` row. The page
+carries the listen address and port, the upstream timeout and rate limit, and
+the switches — remote configuration access, the corner link, mDNS — and links
+to the pages that carry the operations. Saving rebinds the relay in place; the
+harness does not restart.
 
-The card appears only on the machine running the harness. That is not a choice
+The page appears only on the machine running the harness. That is not a choice
 this plugin makes: the harness serves its settings namespaces to a loopback
 browser only, deciding from `location.hostname` on the page itself, so a remote
-browser is dispatched no cards at all. Pairing, the device list, the
+browser is offered no configure control at all. Pairing, the device list, the
 certificate pin, and the password therefore live on the relay's own pages
 instead, which work from any device and before anyone has signed in:
 
@@ -251,7 +255,7 @@ Removing the plugin leaves `~/.dsh/relay/` in place — delete that directory to
 
 **`/relay/devices` sends me back to the chat.** You are on the harness's own port (3080), not the relay's (3443). The harness serves its single-page application for any path it does not recognise, and that routes to the chat. The plugin registers a redirect for `/relay/...` on that port, so this resolves itself after a restart — until then, use the relay's port directly.
 
-**I can't find the relay in the harness Settings page.** Settings → Plugins → Plugin configuration, and only from the machine running the harness — the harness serves settings to a loopback browser only. From a phone, use the **Relay** link in the corner or go to `/relay/devices`.
+**I can't find the relay's settings.** Plugins → dsh-relay → **Configure** on the `relay` row, and only from the machine running the harness — the harness serves settings to a loopback browser only. From a phone, use the **Relay** link in the corner or go to `/relay/devices`.
 
 **Your phone cannot reach the address the relay printed.** It prints every adapter, and a virtual one (`192.168.56.x` is VirtualBox's default) is not routable from your phone. Use the address on the same network your phone is on.
 

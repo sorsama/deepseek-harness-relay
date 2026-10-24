@@ -9,10 +9,18 @@ Built on DeepSeek Harness. Not an official DeepSeek project.
 
 ## Supported harness versions
 
-This release targets harness **0.2.1** (session format 4). The settings card and
-its live configuration follow depend on the 0.1.7+ settings plane, so use
-`dsh-relay@0.2` on harness 0.1.5 and `dsh-relay@0.3` on 0.1.7 through 0.2.1.
-The relay's proxying, pairing, and device revocation work across all of them.
+| Harness | dsh-relay |
+|---|---|
+| **0.1.7-rc.2 through 0.2.x** | **0.3** — verified on 0.2.1-rc.3, 0.2.0-rc.2, and 0.1.7-rc.2 |
+| 0.1.2 through 0.1.5 | 0.2, from its tag: `dsh plugin --profile web add github:sorsama/deepseek-harness-relay#v0.2.1` — the 0.2.1 tarball on npm shipped a stale runtime that cannot authenticate to the harness |
+| 0.1.1 and earlier | 0.1 |
+
+The range is declared as `engines.dsh`, which the harness reads before a
+profile starts: a release outside it is refused with a message naming the
+range, rather than loading half-working. 0.3 cannot run before 0.1.7 — its
+settings page binds to the settings plane that release introduced — and 0.2
+cannot run after it: its browser half waits on a client service 0.1.7
+removed, which holds the whole web boot on a pending entry.
 
 Two things about the 0.1.7+ settings plane are counter-intuitive enough to be
 worth stating, because each fails **silently** — and a working relay with no
@@ -23,7 +31,6 @@ configuration page is the symptom:
   nothing logs.
 - Form fields must be `.volatile()`. A schema without it produces no page rather
   than an empty one.
-
 
 ## Why this exists
 
@@ -62,7 +69,7 @@ phone / browser ──TLS──▶ relay :3443 ──plain HTTP──▶ harness
                           └─ everything else ─proxy─▶ /api · WebSocket downlinks · web UI
 ```
 
-Because the harness stays on loopback, a relay that fails to start or is misconfigured leaves the harness **unreachable** from the network — never open to it. The relay refuses to start at all if it finds the harness already bound to `0.0.0.0`.
+Because the harness stays on loopback, a relay that fails to start or is misconfigured leaves the harness **unreachable** from the network — never open to it. The relay refuses to start at all if it finds the harness already bound to anything but loopback.
 
 ## What you get
 
@@ -72,7 +79,7 @@ Because the harness stays on loopback, a relay that fails to start or is misconf
 - **TLS**, either from your own certificate or self-signed with a published SPKI pin.
 - **mDNS advertisement** on `_dsh._tcp`, so a client can find the relay without sweeping the subnet.
 - **The whole web UI**, unchanged. The proxy is transparent, so the browser app works from a phone exactly as it does locally, with a **Relay** link in the corner for the pages above. Two small additions ride in the index document rather than the proxy: that link, and a shim that lets the page mint request ids where a browser withholds `crypto.randomUUID`.
-- **A card in Settings → Plugins**, on the machine running the harness, for the switches that are configuration rather than operations. It follows the harness's own plugin-card idiom: the switches stage, and a **Save** writes them together — which matters here, because saving rebinds the listeners and drops the connections in flight.
+- **A settings page on the Plugins page**, on the machine running the harness — **Plugins → dsh-relay → Configure** on the `relay` row — for the switches that are configuration rather than operations. It follows the harness's own settings idiom: edits stage, and a **Save** writes them together — which matters here, because saving rebinds the listeners and drops the connections in flight. The relay picks the change up without a restart.
 
 ## Install
 
@@ -242,15 +249,19 @@ Set the network to Private. If it still times out, check the router for AP/clien
 
 **403 from the relay.** The `Host` you reached it by is not trusted. Connect by an IP literal the relay derived itself, or add the name to `publicHostnames`.
 
-**The plugin refuses to start, naming the webserver row.** You still have the old LAN patch that binds the harness to `0.0.0.0`. Remove it — the relay cannot protect a server that is already answering the network.
+**The plugin refuses to start, naming the webserver row.** You still have the old LAN patch that binds the harness to `0.0.0.0`, or the harness was started with `--host`. Remove it — the relay cannot protect a server that is already answering the network.
 
-**DSH Mobile says "the harness rejected this address".** That is a 403. Either the address grant expired or the phone's address changed; pair again from the phone's browser.
+**DSH Mobile says "the harness rejected this address".** That is a 403. Either the address grant expired or the phone's address changed; pair again from the phone's browser. A grant is never issued for loopback or for an address this machine holds — a pairing claimed through a proxy on this machine, or from the machine itself, records the device without one.
 
 **The page loads but the sidebar stays empty, and the console repeats `connection lost, retry #N`.** Browsers expose `crypto.randomUUID` only over HTTPS or on `localhost`, and the harness's browser client mints every RPC id with it — so over plain HTTP from a LAN address the readiness handshake throws and both event sockets are closed before they open. Unary calls still work, which is why sign-in looks fine. The relay ships a shim for this in the index document, so if you still see it the page did not come from that document: hard-reload past a cached copy, and check that nothing in front of the relay is serving its own `index.html`. Browsing over TLS or from `127.0.0.1` avoids it outright.
 
 **Every request is refused, including `/relay/health`, and the log says `untrusted-host`.** The relay answers only to loopback, its own addresses, and whatever `publicHostnames` names — so an address it does not know itself by refuses everything, even the unauthenticated liveness probe, and the app reports a running relay as missing. The log line names the `Host` it refused; add that to `publicHostnames`. The Android emulator's `10.0.2.2` is the one exception, admitted automatically from a loopback peer since 0.2.1.
 
-**Everything is refused with 401, or the app reports a stream that would not open.** The relay could not mint a harness browser session. Harness 0.1.2 authenticates its whole `/api` surface, and the relay signs a cookie using the harness's own durable secret at `client-connection/browser-session` — which the harness creates the first time `dsh web` runs. Start `dsh web` once, then reload the plugin; the relay logs a line at startup when it could not find that secret.
+**Everything is refused with 401, or the app reports a stream that would not open.** The relay could not mint a harness browser session. Harness 0.1.2 authenticates its whole `/api` surface, and the relay signs a cookie using the harness's own durable secret at `client-connection/browser-session`. On a first start the relay usually mounts before the harness has written that secret, and logs `no harness browser-session secret yet`; from 0.3 each request looks again, and the log says `harness browser session is available` once one finds it. If 401s continue after that line, something other than the relay is answering — check that nothing is proxying to the harness's own port.
+
+**The plugin refuses to load, saying the harness web server is bound to an address.** The relay fronts a harness on loopback only. From harness 0.2.1, `dsh web --host <address>` binds the harness itself to that interface, which leaves it reachable without the relay — drop `--host` (or the webserver row override that sets it) and let the relay's `bind` decide what the network sees. A harness configured with its own `tls` is refused for the same reason in reverse: the relay terminates TLS and forwards plain HTTP over loopback.
+
+**`dsh plugin --profile web add` fails with `ERR_PNPM_ADDING_TO_ROOT`.** The profile directory is a pnpm workspace root, and some pnpm versions refuse to add to one without being told. Add `-w`: `dsh plugin --profile web add -w dsh-relay`.
 
 **The model picker is empty, and settings pages say "settings are unavailable in this browser".** Expected on any address but loopback, over TLS as well, and not something the relay can fix from where it sits. The harness's browser client decides whether the configuration plane exists by reading `location.hostname`; on a LAN address it creates the settings mirror in memory and never sends the calls — which this relay would have carried, since `privilegedMethods` defaults to letting an authenticated client through. Sessions, workspaces, and chat are unaffected. Reach settings, the provider directory, and model discovery from a browser on the machine running the harness. The fix belongs upstream, in the client rather than the relay; see [#4](https://github.com/sorsama/deepseek-harness-relay/issues/4).
 
