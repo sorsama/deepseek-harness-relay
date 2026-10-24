@@ -6,7 +6,7 @@
  */
 import { randomBytes } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
-import { HarnessSession } from '../src/harness-session.ts'
+import { HarnessSession, HarnessSessionResolver } from '../src/harness-session.ts'
 import {
   constantTimeEqual,
   hashToken,
@@ -99,57 +99,71 @@ describe('constantTimeEqual', () => {
   })
 })
 
+/** The credential record `dsh-client-connection` stores its signing secret in. */
+function record(secret: Buffer): unknown {
+  return { kind: 'grant', payload: { version: 1, secret: secret.toString('base64url') } }
+}
+
+/** A plugin context whose credentials service answers with whatever `stored` holds. */
+function contextReading(read: () => unknown): Parameters<typeof HarnessSession.load>[0] {
+  return {
+    get: (name: string) => (name === 'credentials' ? { readRecord: async () => read() } : undefined),
+  } as unknown as Parameters<typeof HarnessSession.load>[0]
+}
+
 describe('HarnessSessionResolver', () => {
-  it('never memoizes a miss, so a cold start heals once the secret appears', async () => {
+  const AUTHORITY = '127.0.0.1:3080'
+
+  it('never remembers a miss, so a cold start heals on the next request', async () => {
     // The bug this pins: the relay mounts before `dsh-client-connection` has
-    // written its signing secret. Reading once and caching the miss left the
-    // process forwarding unauthenticated forever — the relay's own pages worked
-    // and every proxied request was answered 401, for the life of the process.
-    const secret = randomBytes(32)
+    // written its signing secret. Reading once and keeping the miss left the
+    // process forwarding unauthenticated forever — the relay's own pages
+    // worked and every proxied request was answered 401.
     let stored: unknown
-    const ctx = {
-      get: (name: string) => (name === 'credentials'
-        ? { readRecord: async () => stored }
-        : undefined),
-    } as unknown as Parameters<typeof HarnessSession.lazy>[0]
+    let announced = 0
+    const resolver = new HarnessSessionResolver(contextReading(() => stored), () => { announced += 1 })
+    expect(await resolver.cookieFor(AUTHORITY)).toBeUndefined()
+    expect(resolver.available).toBe(false)
 
-    const resolver = HarnessSession.lazy(ctx)
-    expect(await resolver.current()).toBeUndefined()
-    expect(resolver.ready).toBe(false)
-    expect(resolver.sync()).toBeUndefined()
-
-    // The harness writes the secret after the relay has already started.
-    stored = {
-      kind: 'grant',
-      payload: { version: 1, secret: secret.toString('base64url') },
-    }
-    const recovered = await resolver.current()
-    expect(recovered).toBeDefined()
-    expect(resolver.ready).toBe(true)
-    // The request path reads this synchronously, so it must see the recovery.
-    expect(resolver.sync()).toBe(recovered)
-    expect(resolver.markRecovered()).toBe(true)
-    expect(resolver.markRecovered()).toBe(false)
+    stored = record(randomBytes(32))
+    expect(await resolver.cookieFor(AUTHORITY)).toMatch(/^dsh-auth-[\w-]+=v1\.[\w-]+\.[\w-]+$/)
+    expect(resolver.available).toBe(true)
+    expect(announced).toBe(1)
   })
 
-  it('picks up a rotated secret instead of freezing the first one', async () => {
-    const first = randomBytes(32)
-    const second = randomBytes(32)
-    let stored: unknown = {
-      kind: 'grant',
-      payload: { version: 1, secret: first.toString('base64url') },
-    }
+  it('heals when the credentials service itself attaches late', async () => {
+    let credentials: unknown
     const ctx = {
-      get: () => ({ readRecord: async () => stored }),
-    } as unknown as Parameters<typeof HarnessSession.lazy>[0]
+      get: (name: string) => (name === 'credentials' ? credentials : undefined),
+    } as unknown as Parameters<typeof HarnessSession.load>[0]
+    const resolver = new HarnessSessionResolver(ctx)
+    expect(await resolver.cookieFor(AUTHORITY)).toBeUndefined()
 
-    const resolver = HarnessSession.lazy(ctx)
-    const one = await resolver.current()
-    expect(one?.cookieFor('127.0.0.1:3080')).toContain('v1.')
+    const secret = record(randomBytes(32))
+    credentials = { readRecord: async () => secret }
+    expect(await resolver.cookieFor(AUTHORITY)).toContain('dsh-auth-')
+  })
 
-    stored = { kind: 'grant', payload: { version: 1, secret: second.toString('base64url') } }
-    const two = await resolver.current()
-    expect(two).not.toBe(one)
-    expect(resolver.sync()).toBe(two)
+  it('reads the store once for a burst of concurrent requests', async () => {
+    let reads = 0
+    const secret = record(randomBytes(32))
+    const resolver = new HarnessSessionResolver(contextReading(() => {
+      reads += 1
+      return secret
+    }))
+    const cookies = await Promise.all(Array.from({ length: 20 }, () => resolver.cookieFor(AUTHORITY)))
+    expect(cookies.every(cookie => cookie?.startsWith('dsh-auth-') === true)).toBe(true)
+    expect(reads).toBe(1)
+    // Once found, the secret is kept, as the harness keeps its own copy.
+    await resolver.cookieFor(AUTHORITY)
+    expect(reads).toBe(1)
+  })
+
+  it('treats a store that throws as a miss rather than failing the request', async () => {
+    const ctx = {
+      get: () => ({ readRecord: () => Promise.reject(new Error('disk on fire')) }),
+    } as unknown as Parameters<typeof HarnessSession.load>[0]
+    const resolver = new HarnessSessionResolver(ctx)
+    await expect(resolver.cookieFor(AUTHORITY)).resolves.toBeUndefined()
   })
 })

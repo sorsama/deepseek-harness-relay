@@ -1,28 +1,28 @@
 /**
- * Publishing the relay's configuration to the harness settings plane, and
- * following edits to it.
+ * Following edits to the relay's configuration.
  *
- * **How this works on dsh 0.1.7, which is not how it worked before.**
+ * **How settings work from dsh 0.1.7, which is not how they worked before.**
  *
  * Through 0.1.5 a plugin registered a namespace imperatively —
  * `ctx.settings.register(ns, schema, { base })` — and got back a scope to read
- * and watch. That API is gone. On 0.1.7 the settings plane reads the schema off
- * the **loader entry** itself (`entry.fiber.runtime.Config`) and serves the
- * entry's own `id` as the namespace; writes land in the profile patch document
- * and are re-resolved into the plugin's live config.
+ * and watch. That API is gone. From 0.1.7 the settings plane reads the schema
+ * off the **loader entry** itself (`entry.fiber.runtime.Config`), serves the
+ * entry's own `id` as the namespace, and edits only the fields the schema
+ * marks `.volatile()`. A write lands in the profile patch document.
  *
- * So there is nothing to register here. The namespace is `relay`, which is the
- * row id this bundle's patch declares, and it exists as soon as the row does —
- * see the default export in `src/index.ts` for the half of that contract which
- * is easy to miss and leaves no error behind.
+ * So there is nothing to register here. The namespace is `relay`, the row id
+ * this bundle's patch declares, and it exists as soon as the row does — see
+ * the default export in `src/index.ts` for the half of that contract which is
+ * easy to miss and leaves no error behind.
  *
- * What is left to do is **follow the changes**. A `.volatile()` field resolves
- * to a live handle rather than a copy, and a settings write swaps the value
- * under the running plugin. The relay's listeners are built from that value, so
- * a change has to reach {@link Supervisor.apply} — and taking a listener down
- * is exactly the kind of side effect that must not happen while the plugin is
- * unloading.
- *
+ * What is left is to **follow the changes**. When an edit touches only
+ * volatile fields the loader does not remount the plugin: it writes the new
+ * values into the live handles the plugin was given and emits
+ * `loader/volatile-update` to that plugin alone. The relay's listeners are
+ * built from those values, so the event has to reach the supervisor — and
+ * rebinding listeners is exactly the kind of side effect that must not happen
+ * while the plugin is unloading. An edit that also changes an ordinary field
+ * remounts the plugin instead, which needs nothing from here.
  * @module dsh-relay/settings-section
  */
 
@@ -36,20 +36,21 @@ import type { Context } from '@deepseek-ai/cordis'
 const FIBER_DISPOSED = 4
 const FIBER_UNLOADING = 5
 
-/** The settings namespace this plugin owns, in both halves. */
+/** The settings namespace this plugin owns, in both halves: the row id of the bundle patch. */
 export const RELAY_NAMESPACE = 'relay'
 
-/** Namespaces must be lowercase kebab-case, as the service brands them. */
-const NAMESPACE_PATTERN = /^[a-z][\da-z]*(-[\da-z]+)*$/
+/**
+ * The loader event announcing new values under this plugin's volatile
+ * handles. Dispatched with a filter that reaches only listeners of the fiber
+ * whose configuration changed, so no namespace check is needed here.
+ */
+const VOLATILE_UPDATE = 'loader/volatile-update'
 
 /**
- * Whether the consumer's own fiber is tearing down, rather than merely losing
- * the settings service.
+ * Whether the consumer's own fiber is tearing down.
  *
- * The distinction decides whether a change notification is useful or harmful:
- * a provider detaching leaves the relay running, while the relay's own unload
- * would have `onChange` rebuilding listeners over resources the teardown is
- * releasing.
+ * A change notification during teardown would have the supervisor rebuilding
+ * listeners over resources the teardown is releasing.
  * @param ctx - the consumer's plugin context.
  * @returns true while this plugin is unloading or disposed.
  */
@@ -59,65 +60,19 @@ function isUnloading(ctx: Context): boolean {
 }
 
 /**
- * The slice of the Cordis context this module needs.
+ * Call [onChange] whenever an edit changes the relay's volatile configuration.
  *
- * The event is subscribed on the **context**, not on the settings service. That
- * is the whole trap here: `SettingsForms extends Service`, so `settings.on` is
- * undefined and optional-chaining it silently subscribes to nothing. Events are
- * a cordis context facility — `dsh-api-remotes` forwards this very event with
- * `ctx.on(...)` on its own plugin context — and they propagate to the root, so
- * the consumer's own context is the right place to listen.
- */
-interface EventContext {
-  on: (event: string, listener: (...args: unknown[]) => void) => () => void
-}
-
-/** The slice of the configuration editor this module uses. */
-interface ConfigEditorService {
-  /** The profile patch document path. */
-  documentPath?: string
-}
-
-/**
- * Follow edits to the relay's configuration.
- *
- * A settings write on 0.1.7 re-resolves the entry's config and emits
- * `settings/document-updated` with the entry id. The plugin's own `config`
- * object is a set of live handles, so by the time the event arrives the new
- * values are already readable through it — the only thing needed here is to
- * tell the relay to rebuild from them.
- *
- * A deployment without a settings plane never fires this, and the relay simply
- * runs under the configuration it was composed with.
- *
+ * The subscription belongs to the plugin's fiber and is released with it. A
+ * deployment without the 0.1.7 settings plane never fires the event, and the
+ * relay simply runs under the configuration it was composed with.
  * @param ctx - the relay's plugin context.
- * @param hooks.onChange - called after every change to the configuration.
- * @returns a disposer removing the subscription.
+ * @param onChange - called after the new values are readable through the handles.
  */
-export function followSettings(ctx: Context, hooks: { onChange: () => void }): () => void {
-  if (!NAMESPACE_PATTERN.test(RELAY_NAMESPACE)) {
-    throw new Error(`dsh-relay: settings namespace ${JSON.stringify(RELAY_NAMESPACE)} must be lowercase kebab-case`)
-  }
-  // `ctx.inject` defers until the services exist and disposes the callback when
-  // they go away, which is the lifetime a settings subscription wants: a
-  // deployment that never mounts the settings plane costs one parked fiber and
-  // nothing else.
-  ctx.inject(['settings', 'configEditor'], (scoped: Context) => {
-    const editor = scoped.get('configEditor') as unknown as ConfigEditorService
-    // Without a document there is nowhere for an edit to land, so there is
-    // nothing to follow.
-    if (editor.documentPath === undefined) return
-    const events = scoped as unknown as EventContext
-    const off = events.on('settings/document-updated', (ns: unknown) => {
-      // A change landing during teardown reaches the listener before the
-      // registration is released, and is as harmful here as anywhere else.
-      if (isUnloading(ctx)) return
-      // One namespace per entry, and several entries have one; only this
-      // plugin's own edits should rebuild its listeners.
-      if (ns !== RELAY_NAMESPACE) return
-      hooks.onChange()
-    })
-    scoped.effect(() => () => { off() }, 'dsh-relay: settings subscription')
+export function followSettings(ctx: Context, onChange: () => void): void {
+  // An event outside cordis's declared map, so the typed `on` is bypassed.
+  const events = ctx as unknown as { on: (event: string, listener: () => void) => () => void }
+  events.on(VOLATILE_UPDATE, () => {
+    if (isUnloading(ctx)) return
+    onChange()
   })
-  return () => undefined
 }

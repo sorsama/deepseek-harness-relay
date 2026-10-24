@@ -73,7 +73,7 @@ beforeEach(async () => {
   const runtime: RelayRuntime = {
     auth,
     config,
-    target: { host: '127.0.0.1', port: upstreamPort, timeoutMs: 5000, session: () => undefined },
+    target: { host: '127.0.0.1', port: upstreamPort, timeoutMs: 5000 },
     log: () => undefined,
   }
   relay = await startListener({ runtime, bind: '127.0.0.1', port: 0, authorities: ['127.0.0.1', 'localhost'] })
@@ -341,7 +341,7 @@ describe('a reverse proxy on loopback is not the operator', () => {
     const config = plainConfig(Config({ stateDir: dir, port: 0, tls: 'off', mdns: false, rateLimitPerMinute: 1 }) as Parameters<typeof plainConfig>[0])
     const throttled = new Authenticator(store, config)
     const listener = await startListener({
-      runtime: { auth: throttled, config, target: { host: '127.0.0.1', port: upstreamPort, timeoutMs: 5000, session: () => undefined }, log: () => undefined },
+      runtime: { auth: throttled, config, target: { host: '127.0.0.1', port: upstreamPort, timeoutMs: 5000 }, log: () => undefined },
       bind: '127.0.0.1',
       port: 0,
       authorities: ['127.0.0.1', 'localhost'],

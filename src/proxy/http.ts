@@ -9,7 +9,7 @@
 
 import { request as httpRequest } from 'node:http'
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import type { HarnessSession } from '../harness-session.ts'
+import type { HarnessSessionSource } from '../harness-session.ts'
 import { downstreamHeaders, upstreamHeaders } from './rewrite.ts'
 
 /** What the forwarder needs to reach the harness. */
@@ -21,20 +21,16 @@ export interface UpstreamTarget {
   /** Deadline for the upstream response to begin. */
   readonly timeoutMs: number
   /**
-   * Mints the harness browser session each forwarded request carries.
+   * Supplies the harness browser session each forwarded request carries.
    *
-   * Read **per request**, not captured when the listener bound. A cold start
-   * mounts this plugin before `dsh-client-connection` has written its signing
-   * secret, and a value captured once would freeze that single miss into every
-   * later request — the failure mode where the relay's own pages keep working
-   * while every proxied call is answered 401, which reaches a phone as "the
-   * stream would not open".
-   *
-   * Returns undefined against a harness older than 0.1.2, which required none,
-   * and during the first moments of a cold start on 0.1.2 or later.
-   * @returns the minter, or undefined while the harness has no such secret.
+   * Asked **per request**, never captured when the listener bound: a cold
+   * start mounts this plugin before the harness has written its signing
+   * secret, and a value captured then would leave every later request
+   * unauthenticated — the relay's own pages working while every proxied call
+   * is answered 401. Undefined only in tests that stand in for a harness with
+   * no authentication at all.
    */
-  session: () => HarnessSession | undefined
+  readonly session?: HarnessSessionSource | undefined
 }
 
 /** The authority the harness sees, and compares its own fence against. */
@@ -49,16 +45,20 @@ export function loopbackAuthority(target: UpstreamTarget): string {
  * @param target - the loopback harness.
  * @returns resolution once the response is finished or an error was reported.
  */
-export function forward(req: IncomingMessage, res: ServerResponse, target: UpstreamTarget): Promise<void> {
-  return new Promise((resolve) => {
+export async function forward(req: IncomingMessage, res: ServerResponse, target: UpstreamTarget): Promise<void> {
+  const authority = loopbackAuthority(target)
+  const cookie = await target.session?.cookieFor(authority)
+  // The client may have gone while the session was being read; there is
+  // nothing left to forward, and piping a destroyed request would leave the
+  // upstream waiting on a body until it timed out.
+  if (req.destroyed) return
+  await new Promise<void>((resolve) => {
     const upstream = httpRequest({
       host: target.host,
       port: target.port,
       method: req.method ?? 'GET',
       path: req.url ?? '/',
-      headers: upstreamHeaders(req.headers, loopbackAuthority(target), {
-        cookie: target.session()?.cookieFor(loopbackAuthority(target)),
-      }),
+      headers: upstreamHeaders(req.headers, authority, { cookie }),
       // Each proxied request gets its own socket rather than sharing the
       // global agent's pool, so one stalled streaming response cannot hold a
       // slot another request is waiting for.

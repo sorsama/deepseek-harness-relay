@@ -97,32 +97,10 @@ export class HarnessSession {
   private constructor(private readonly secret: Buffer) {}
 
   /**
-   * The signing secret, for the resolver's rotation check.
-   *
-   * Package-internal by convention: it exists so {@link HarnessSessionResolver}
-   * can tell a rotated secret from the one it memoized, and nothing outside
-   * this module has a reason to read it.
-   * @returns the 32-byte signing secret.
-   */
-  get signingSecret(): Buffer {
-    return this.secret
-  }
-
-  /**
-   * Mint a session over a known secret, for callers that already read it.
-   * @param secret - a 32-byte signing secret.
-   * @returns a minter over that secret.
-   */
-  static over(secret: Buffer): HarnessSession {
-    return new HarnessSession(secret)
-  }
-
-  /**
    * Load the harness's cookie-signing secret.
    *
    * @param ctx - plugin context; `ctx.credentials` is the harness's own store.
-   * @returns a minter, or undefined when this harness keeps no such secret —
-   *   which is every release before 0.1.2, where nothing needed one.
+   * @returns a minter, or undefined when the store holds no such secret yet.
    */
   static async load(ctx: Context): Promise<HarnessSession | undefined> {
     const credentials = ctx.get('credentials') as undefined | {
@@ -132,33 +110,6 @@ export class HarnessSession {
     const record = await credentials.readRecord(RECORD_KEY).catch(() => undefined)
     const secret = readSecret(record)
     return secret === undefined ? undefined : new HarnessSession(secret)
-  }
-
-  /**
-   * A minter that reads the secret **on every request**, so a harness that had
-   * not written it yet at plugin-mount time still gets one.
-   *
-   * This exists because {@link load} alone is not enough, and the failure it
-   * leaves behind is invisible from the phone: on a cold start the relay mounts
-   * before `dsh-client-connection` has created its signing secret, `load`
-   * returns `undefined`, and the relay then forwards **unauthenticated for the
-   * rest of the process's life**. Every proxied request is answered 401 while
-   * the relay's own pages keep working, so it reads as "the stream would not
-   * open" rather than as a missing credential. Production carried a
-   * `relay-hotreload.sh` workaround that edited the config after boot purely to
-   * force this plugin to re-run `load`.
-   *
-   * The credentials provider's own contract is the reason this is a read
-   * rather than a race to patch: "Resolution is per call: consumers re-resolve
-   * at each operation and must not cache across operations." Reading it per
-   * request is the documented usage, and it also picks up a secret rotated
-   * under a running process.
-   *
-   * @param ctx - plugin context; `ctx.credentials` is the harness's own store.
-   * @returns a resolver that yields a minter once the secret exists.
-   */
-  static lazy(ctx: Context): HarnessSessionResolver {
-    return new HarnessSessionResolver(ctx)
   }
 
   /**
@@ -189,83 +140,75 @@ export class HarnessSession {
   }
 }
 
+/** Supplies the harness browser session a forwarded request presents. */
+export interface HarnessSessionSource {
+  /**
+   * The `Cookie` header value for [authority], or undefined while the harness
+   * has no secret for the relay to sign with.
+   * @param authority - the upstream `host:port` this request will carry.
+   * @returns one `name=value` pair, or undefined when unauthenticated.
+   */
+  cookieFor(authority: string): Promise<string | undefined>
+}
+
 /**
- * Resolves the harness browser session per request, retrying until it exists.
+ * The relay's live handle on the harness browser session, resolved from the
+ * request path rather than once at startup.
  *
- * Once the secret has been seen it is memoized: the read is cheap, but this
- * sits on the path of every proxied request and every WebSocket upgrade, and a
- * disk read per request for a value that does not change is waste. The
- * memoized value is dropped only if the store later stops answering, so a
- * rotated or removed secret is picked up rather than frozen.
+ * On a cold start this plugin mounts before `dsh-client-connection` has
+ * written its signing secret, and the credentials service itself may attach
+ * later still. A single read at startup froze that miss into every request for
+ * the life of the process: the relay's own pages kept working while every
+ * proxied call was answered 401, which a phone reports as a stream that would
+ * not open. Here a miss is never remembered — each request that finds no
+ * session reads the store again, so the first request after the secret exists
+ * already carries it.
  *
- * A *missing* secret is never memoized — that is the whole point. The negative
- * result is what a cold start produces, and caching it is precisely the bug
- * this class exists to fix.
+ * A found secret is kept for the life of this relay. That matches the harness:
+ * the connection loads the secret once when it activates and verifies every
+ * cookie against that copy, so the stored record changing under a running
+ * harness would not change what it accepts either.
  */
-export class HarnessSessionResolver {
-  #cached: HarnessSession | undefined
-  /** Set once the store has answered with a usable record, so misses after that are logged once. */
-  #warned = false
+export class HarnessSessionResolver implements HarnessSessionSource {
+  #session: HarnessSession | undefined
+  #pending: Promise<HarnessSession | undefined> | undefined
 
   /**
    * @param ctx - plugin context; `ctx.credentials` is the harness's own store.
+   * @param onAvailable - called once, when the secret is first found.
    */
-  constructor(private readonly ctx: Context) {}
+  constructor(private readonly ctx: Context, private readonly onAvailable: () => void = () => undefined) {}
+
+  /** Whether a session has been found, so forwarded requests authenticate. */
+  get available(): boolean {
+    return this.#session !== undefined
+  }
 
   /**
-   * The current minter, reading the store when it is not already known.
-   * @returns a minter, or undefined while the harness has no such secret —
-   *   which is every release before 0.1.2, and the first moments of a cold
-   *   start on 0.1.2 or later.
+   * The current minter, reading the store while none has been found.
+   * @returns the minter, or undefined while the harness has no such secret.
    */
   async current(): Promise<HarnessSession | undefined> {
-    const credentials = this.ctx.get('credentials') as undefined | {
-      readRecord?: (key: string) => Promise<unknown>
+    if (this.#session !== undefined) return this.#session
+    // One read in flight at a time: a page load fans out into dozens of
+    // requests at once, and every one of them would otherwise read the store.
+    this.#pending ??= HarnessSession.load(this.ctx)
+      .catch(() => undefined)
+      .finally(() => { this.#pending = undefined })
+    const found = await this.#pending
+    if (found !== undefined && this.#session === undefined) {
+      this.#session = found
+      this.onAvailable()
     }
-    if (credentials?.readRecord === undefined) return undefined
-    const record = await credentials.readRecord(RECORD_KEY).catch(() => undefined)
-    const secret = readSecret(record)
-    if (secret === undefined) {
-      // Not memoized: the secret may simply not be written yet.
-      this.#cached = undefined
-      return undefined
-    }
-    if (this.#cached === undefined || !this.#cached.signingSecret.equals(secret)) {
-      this.#cached = HarnessSession.over(secret)
-      this.#warned = false
-    }
-    return this.#cached
+    return this.#session
   }
 
   /**
-   * The current minter without touching the store.
-   *
-   * The request path cannot await: it builds headers synchronously for every
-   * proxied call and every WebSocket upgrade. This returns whatever the last
-   * {@link current} read resolved, which {@link HarnessSessionResolver} keeps
-   * fresh in the background.
-   * @returns the memoized minter, or undefined while none has been read.
+   * The `Cookie` header value for [authority].
+   * @param authority - the upstream `host:port` this request will carry.
+   * @returns one `name=value` pair, or undefined while unauthenticated.
    */
-  sync(): HarnessSession | undefined {
-    return this.#cached
-  }
-
-  /**
-   * Whether this resolver has ever produced a session.
-   * @returns true once the harness's secret has been read successfully.
-   */
-  get ready(): boolean {
-    return this.#cached !== undefined
-  }
-
-  /**
-   * Note the first successful read, so a cold start can be reported as
-   * recovered rather than passed over in silence.
-   * @returns true the first time it is called after a miss, false afterwards.
-   */
-  markRecovered(): boolean {
-    if (this.#warned) return false
-    this.#warned = true
-    return true
+  async cookieFor(authority: string): Promise<string | undefined> {
+    return (await this.current())?.cookieFor(authority)
   }
 }

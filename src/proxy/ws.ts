@@ -90,6 +90,30 @@ export function forwardUpgrade(
   target: UpstreamTarget,
   ledger: SocketLedger,
 ): void {
+  void startUpgrade(req, socket, head, target, ledger)
+}
+
+/**
+ * Read the harness session, open the upstream upgrade, and pipe both sockets.
+ *
+ * The session is read here rather than handed in, so a secret that appears
+ * after the relay started still authenticates the very upgrade that follows.
+ * @param req - the upgrade request.
+ * @param socket - the client socket, still holding the handshake.
+ * @param head - bytes the client already sent past the handshake.
+ * @param target - the loopback harness.
+ * @param ledger - registry the established socket pair joins.
+ */
+async function startUpgrade(
+  req: IncomingMessage,
+  socket: Duplex,
+  head: Buffer,
+  target: UpstreamTarget,
+  ledger: SocketLedger,
+): Promise<void> {
+  const authority = loopbackAuthority(target)
+  const cookie = await target.session?.cookieFor(authority)
+  if (socket.destroyed) return
   const upstream = httpRequest({
     host: target.host,
     port: target.port,
@@ -98,10 +122,7 @@ export function forwardUpgrade(
     // The upgrade needs the session as much as a POST does: 0.1.2 authenticates
     // `/api/remote.mux` before the handshake, and a refusal there surfaces to a
     // client as a stream that would not open rather than as a 401 it can read.
-    headers: upstreamHeaders(req.headers, loopbackAuthority(target), {
-      keepUpgrade: true,
-      cookie: target.session()?.cookieFor(loopbackAuthority(target)),
-    }),
+    headers: upstreamHeaders(req.headers, authority, { keepUpgrade: true, cookie }),
     agent: false,
   })
 

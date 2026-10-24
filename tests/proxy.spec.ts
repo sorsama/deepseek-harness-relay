@@ -133,9 +133,8 @@ async function startRelay(overrides: Partial<RelayConfig> = {}): Promise<void> {
       host: '127.0.0.1',
       port: upstreamPort,
       timeoutMs: 5000,
-      // Read per request, as the live target is: a getter keeps the fixture
-      // honest about the contract the forwarder actually uses.
-      session: () => HarnessSession.forTesting(SESSION_SECRET),
+      // Asked per request, as the live resolver is.
+      session: { cookieFor: async authority => HarnessSession.forTesting(SESSION_SECRET).cookieFor(authority) },
     },
     log: () => undefined,
   }
