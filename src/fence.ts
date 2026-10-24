@@ -143,6 +143,39 @@ export function isPrivateAddress(address: string): boolean {
 }
 
 /**
+ * Whether a bind or peer address names this machine's loopback interface.
+ * @param address - an IPv4 or IPv6 literal, brackets and the IPv4-mapped prefix optional, or `localhost`.
+ * @returns true for `localhost`, `::1`, and any IPv4 address in 127/8.
+ */
+export function isLoopbackAddress(address: string): boolean {
+  const bare = address.replace(/^\[/, '').replace(/\]$/, '').replace(/^::ffff:/i, '').toLowerCase()
+  return bare === '::1' || isLoopbackHostname(bare)
+}
+
+/**
+ * Whether an address may hold an address grant.
+ *
+ * Beyond the private ranges {@link isPrivateAddress} admits, two kinds of
+ * address are never granted, because a grant on either admits far more than
+ * the phone that paired:
+ *
+ * - **Loopback.** A loopback peer is the operator only when it carries no
+ *   forwarding header; a reverse proxy on this machine connects from loopback
+ *   on behalf of everyone it serves. A grant on 127.0.0.1 would seat every one
+ *   of those clients as the paired device.
+ * - **This machine's own addresses.** Containers and virtual machines NAT'd
+ *   through the host reach it from the host's own address, so a grant on that
+ *   address admits every workload on the machine.
+ * @param address - a normalized source address.
+ * @returns true when a grant on this address admits only what it names.
+ */
+export function isGrantableAddress(address: string): boolean {
+  if (!isPrivateAddress(address) || isLoopbackAddress(address)) return false
+  const bare = address.replace(/^\[/, '').replace(/\]$/, '').replace(/^::ffff:/i, '')
+  return !localAddresses().includes(bare)
+}
+
+/**
  * Refuse a configured authority that is not already canonical.
  *
  * Anything WHATWG parsing would silently rewrite is a typo that must fail the
