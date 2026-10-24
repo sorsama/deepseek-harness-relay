@@ -17,7 +17,7 @@
 import type { IncomingHttpHeaders } from 'node:http'
 import type { Config } from '../config.ts'
 import type { DeviceRecord, RelayStore } from '../state.ts'
-import { isPrivateAddress } from '../fence.ts'
+import { isGrantableAddress } from '../fence.ts'
 import { hashPassword, verifyPassword } from './password.ts'
 import { PairingWindow } from './pairing.ts'
 import { Throttle } from './ratelimit.ts'
@@ -188,7 +188,9 @@ export class Authenticator {
       }
     }
 
-    if (this.config.compat.addressGrants) {
+    // A grant recorded before the relay refused loopback and this machine's
+    // own addresses must not keep admitting what it no longer would issue.
+    if (this.config.compat.addressGrants && isGrantableAddress(request.address)) {
       const grant = this.store.state.grants[request.address]
       if (grant !== undefined && now < grant.expiresAt && now >= grant.createdAt) {
         const device = this.store.state.devices[grant.deviceId]
@@ -285,8 +287,10 @@ export class Authenticator {
       draft.devices[device.id] = device
       // The grant is what lets a client that cannot send a credential at all
       // reach the harness. It is refused outside private ranges, because a
-      // public address is shared with everyone behind the same carrier NAT.
-      if (this.config.compat.addressGrants && isPrivateAddress(options.address)) {
+      // public address is shared with everyone behind the same carrier NAT,
+      // and on loopback or this machine's own addresses, which stand for
+      // every client of a local proxy or every container on the host.
+      if (this.config.compat.addressGrants && isGrantableAddress(options.address)) {
         draft.grants[options.address] = {
           address: options.address,
           deviceId: device.id,
@@ -315,7 +319,7 @@ export class Authenticator {
       if (record === undefined) return
       record.lastSeenAt = now
       record.lastAddress = address
-      if (this.config.compat.addressGrants && isPrivateAddress(address)) {
+      if (this.config.compat.addressGrants && isGrantableAddress(address)) {
         draft.grants[address] = {
           address,
           deviceId,

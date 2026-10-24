@@ -1,5 +1,106 @@
 # Changelog
 
+## 0.3.0 — 2026-10-24
+
+Harness **0.1.7 through 0.2.x** support. On any of them the published 0.2.1
+breaks the web UI outright: its browser half waits on a client service 0.1.7
+removed, the boot counts that pending entry as a failure, and the page renders
+nothing but `dsh-relay: pending (waiting for service: settingsScope)`
+([#11](https://github.com/sorsama/deepseek-harness-relay/issues/11),
+[#13](https://github.com/sorsama/deepseek-harness-relay/issues/13)). The npm
+tarball of 0.2.1 also shipped a runtime older than its own sources, so it
+could not authenticate to a harness 0.1.2 or later at all.
+
+**Requires harness 0.1.7-rc.2 or later.** On harness 0.1.2 through 0.1.5,
+stay on 0.2, installed from its tag
+(`github:sorsama/deepseek-harness-relay#v0.2.1`) rather than from npm.
+
+### Fixed
+
+- **The web UI boots again on 0.1.7 and later, and the settings page is back.**
+  The browser half injects `configForms` instead of the removed
+  `settingsScope`, and registers on the relay's own row of the Plugins page —
+  **Plugins → dsh-relay → Configure** — through `plugins.row.config`, keyed
+  `dsh-relay#relay`. The 0.1.5 seat, `settings.plugin.item`, no longer exists.
+  The page renders inside the platform's frame through the shared
+  `SettingsForm` rather than drawing a card of its own.
+- **The settings plane could not see the relay.** From 0.1.7 it reads an
+  entry's schema off the loader's plugin object, which is the module's default
+  export when there is one — and this module had none. It also lists only
+  fields marked `.volatile()`, and drops a schema with none. The schema now
+  rides a default export with every form field volatile; `stateDir` stays off
+  the form.
+- **A settings edit now reaches the running relay.** Saving rebinds the
+  listeners in place, with no restart: the relay follows
+  `loader/volatile-update`, which the loader sends to this plugin alone once
+  the new values are under its handles.
+- **A switch on the settings page took the page down.** The remote
+  configuration, relay link, and mDNS switches staged fields the form model
+  had no spec for, so the first click threw on the next render. Each switch
+  now has a spec, shows its staged value, and saves as the schema's own type.
+- **A cold start forwarded unauthenticated for the life of the process.** The
+  relay mounts before the harness writes its cookie-signing secret, read it
+  once, and kept the miss — so every proxied request was answered 401 while
+  the relay's own pages kept working, and a phone reported a stream that would
+  not open. The secret is now read from the request path: a miss is never
+  kept, the first request after the secret exists carries it, and the log
+  says so once.
+- **The npm tarball could ship a stale runtime.** `prepare` skips a checkout
+  whose bundles exist, so a publish packed whatever `lib/` held. `prepack` now
+  rebuilds both halves, and `pnpm test:pack` — run in CI — poisons the runtime,
+  packs, and reads the bytes inside the tarball.
+- **A changed address set no longer orphans paired devices.** When the
+  addresses the self-signed certificate covers changed at start — a VPN
+  dropping, an IP moving — the relay re-issued the certificate with a **new
+  key**, and every device pinning the old one failed until re-paired. The
+  certificate is now re-issued on the stored key, so the pin survives; only a
+  missing key file mints a new identity.
+- **An address grant could cover far more than one phone.** A pairing claimed
+  through a reverse proxy on this machine arrives from `127.0.0.1`, and one
+  claimed on the machine itself from its own LAN address; granting either
+  admitted every client of the proxy, or every container NAT'd through the
+  host, without a credential. Grants are now refused on loopback and on this
+  machine's own addresses, and one an earlier release recorded there is
+  ignored.
+- **Two pairings of one phone can be told apart** on `/relay/devices`
+  ([#8](https://github.com/sorsama/deepseek-harness-relay/issues/8)): each row
+  shows when it was paired beside when it was last seen, and the last four
+  characters of its device id beside its name.
+
+### Changed
+
+- **The supported harness range is stated, and enforced by the harness.**
+  `engines.dsh` and the `@deepseek-ai/dsh-*` peers read
+  `>=0.1.7-rc.2 <0.3.0-0`; the old open `>=0.1.0-rc.7` claimed every release
+  including the ones this build cannot run on. The harness refuses a plugin
+  outside its range before the profile starts, with a message that names it.
+- **The relay refuses a harness it cannot protect or reach.** It already
+  refused one bound to `0.0.0.0`; it now refuses one bound to any non-loopback
+  address, which 0.2.1's `--host` allows, and one serving TLS itself, which a
+  plain loopback forward cannot speak to.
+- `@deepseek-ai/schemastery` is `^3.18.5`, and the browser half is checked
+  against the harness's own `dsh-client-ui-primitives` types.
+
+### Verified
+
+On Windows, each against a real harness in an isolated home, installing the
+packed tarball:
+
+- **0.2.1-rc.3, 0.2.0-rc.2, and 0.1.7-rc.2**: the cold start heals on the first
+  request; the web UI boots with the browser half active; the settings page
+  renders, a switch stages without error, and a port edit rebinds the relay
+  without restarting the harness; the Host fence, pairing, the key pin, a
+  bearer token on `/api` and on the `/api/remote.mux` upgrade, and no grant on
+  the machine's own address.
+- **0.2.1-rc.3** additionally: password sign-in from the LAN, revocation, the
+  pin and password surviving a restart, and the refusal to front a harness
+  started with `--host <LAN address>`.
+
+Thanks to @snailium (#10), @makhammadzhanov (#6), @hazyumps (#12, #14), and
+@js-easy-school (#9) for the changes this release is built from, and to
+@dimpurr, @johnlam1968, and @Cruzor-Blade for the reports and measurements in
+#11 and #13.
+
 ## 0.2.1
 
 ### Fixed

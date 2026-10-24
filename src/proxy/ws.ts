@@ -90,6 +90,40 @@ export function forwardUpgrade(
   target: UpstreamTarget,
   ledger: SocketLedger,
 ): void {
+  // The session is read before the upstream opens, so the client socket waits
+  // a moment with nothing listening for its errors — and an unheard 'error'
+  // event, like an unhandled rejection, takes the whole harness process down
+  // rather than this one socket. Both are caught here.
+  const early = (): void => { socket.destroy() }
+  socket.on('error', early)
+  startUpgrade(req, socket, head, target, ledger, early).catch(() => {
+    if (!socket.destroyed) rejectUpgrade(socket, 502, 'Bad Gateway')
+  })
+}
+
+/**
+ * Read the harness session, open the upstream upgrade, and pipe both sockets.
+ *
+ * The session is read here rather than handed in, so a secret that appears
+ * after the relay started still authenticates the very upgrade that follows.
+ * @param req - the upgrade request.
+ * @param socket - the client socket, still holding the handshake.
+ * @param head - bytes the client already sent past the handshake.
+ * @param target - the loopback harness.
+ * @param ledger - registry the established socket pair joins.
+ * @param early - the provisional error listener, replaced once the upstream opens.
+ */
+async function startUpgrade(
+  req: IncomingMessage,
+  socket: Duplex,
+  head: Buffer,
+  target: UpstreamTarget,
+  ledger: SocketLedger,
+  early: () => void,
+): Promise<void> {
+  const authority = loopbackAuthority(target)
+  const cookie = await target.session?.cookieFor(authority)
+  if (socket.destroyed) return
   const upstream = httpRequest({
     host: target.host,
     port: target.port,
@@ -98,10 +132,7 @@ export function forwardUpgrade(
     // The upgrade needs the session as much as a POST does: 0.1.2 authenticates
     // `/api/remote.mux` before the handshake, and a refusal there surfaces to a
     // client as a stream that would not open rather than as a 401 it can read.
-    headers: upstreamHeaders(req.headers, loopbackAuthority(target), {
-      keepUpgrade: true,
-      cookie: target.session?.cookieFor(loopbackAuthority(target)),
-    }),
+    headers: upstreamHeaders(req.headers, authority, { keepUpgrade: true, cookie }),
     agent: false,
   })
 
@@ -111,6 +142,7 @@ export function forwardUpgrade(
   }
 
   socket.on('error', abandon)
+  socket.removeListener('error', early)
   upstream.on('error', () => {
     if (!socket.destroyed) rejectUpgrade(socket, 502, 'Bad Gateway')
     upstream.destroy()

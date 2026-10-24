@@ -16,7 +16,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { Authenticator } from '../src/auth/index.ts'
 import { injectRelayLink } from '../src/badge.ts'
-import { Config, type Config as RelayConfig } from '../src/config.ts'
+import { Config, plainConfig } from '../src/config.ts'
 import { startListener, type RelayListener, type RelayRuntime } from '../src/server.ts'
 import { injectSecureContextShim } from '../src/secure-context.ts'
 import { RelayStore } from '../src/state.ts'
@@ -68,7 +68,7 @@ beforeEach(async () => {
   const upstreamAddress = upstream.address()
   const upstreamPort = typeof upstreamAddress === 'object' && upstreamAddress !== null ? upstreamAddress.port : 0
 
-  const config = Config({ stateDir: dir, port: 0, tls: 'off', mdns: false }) as RelayConfig
+  const config = plainConfig(Config({ stateDir: dir, port: 0, tls: 'off', mdns: false }) as Parameters<typeof plainConfig>[0])
   auth = new Authenticator(store, config)
   const runtime: RelayRuntime = {
     auth,
@@ -157,6 +157,49 @@ describe('the devices page', () => {
     const answer = await get('/relay/devices')
     expect(answer.body).toContain('Change the password')
   }, 20_000)
+})
+
+describe('two rows for one phone can be told apart', () => {
+  /** Enrol one device whose name, address, and id are pinned by the caller. */
+  async function enrol(id: string, createdAt: number, lastSeenAt?: number): Promise<void> {
+    await store.update((draft) => {
+      draft.devices[id] = {
+        id,
+        name: 'samsung SM-S731B',
+        tokenHash: `hash-${id}`,
+        createdAt,
+        expiresAt: createdAt + 30 * 24 * 60 * 60 * 1000,
+        ...lastSeenAt !== undefined && { lastSeenAt, lastAddress: '192.168.0.85' },
+      }
+    })
+  }
+
+  it('says when each device was paired, next to when it was last seen', async () => {
+    // Two pairings of one handset, two hours apart, the stale one never used:
+    // every other column on the page reads the same for both rows.
+    const now = Date.now()
+    const older = now - 2 * 60 * 60 * 1000
+    await enrol('aaaaaaaa1111', older, older)
+    await enrol('bbbbbbbb2222', now)
+
+    const answer = await get('/relay/devices')
+    expect(answer.status).toBe(200)
+    expect(answer.body).toContain('paired 2 h ago')
+    expect(answer.body).toContain('paired just now')
+    expect(answer.body).toContain('last seen 2 h ago')
+    expect(answer.body).toContain('last seen never')
+  })
+
+  it('shows a short tail of each id, so equal names are distinguishable', async () => {
+    const now = Date.now()
+    await enrol('aaaaaaaa1111', now, now)
+    await enrol('bbbbbbbb2222', now, now)
+
+    const answer = await get('/relay/devices')
+    expect(answer.body.match(/samsung SM-S731B/g)).toHaveLength(2)
+    expect(answer.body).toContain('>1111<')
+    expect(answer.body).toContain('>2222<')
+  })
 })
 
 describe('the link into the harness UI', () => {
@@ -295,7 +338,7 @@ describe('a reverse proxy on loopback is not the operator', () => {
   it('throttles the proxy, which the operator never is', async () => {
     const upstreamAddress = upstream.address()
     const upstreamPort = typeof upstreamAddress === 'object' && upstreamAddress !== null ? upstreamAddress.port : 0
-    const config = Config({ stateDir: dir, port: 0, tls: 'off', mdns: false, rateLimitPerMinute: 1 }) as RelayConfig
+    const config = plainConfig(Config({ stateDir: dir, port: 0, tls: 'off', mdns: false, rateLimitPerMinute: 1 }) as Parameters<typeof plainConfig>[0])
     const throttled = new Authenticator(store, config)
     const listener = await startListener({
       runtime: { auth: throttled, config, target: { host: '127.0.0.1', port: upstreamPort, timeoutMs: 5000 }, log: () => undefined },

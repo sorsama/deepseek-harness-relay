@@ -26,27 +26,47 @@ import type { Context } from '@deepseek-ai/cordis'
 // release that still provides the services it injects.
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import { Authenticator } from './auth/index.ts'
-import { assertCoherent, Config } from './config.ts'
+import { assertCoherent, Config, plainConfig, type ConfigSchema } from './config.ts'
 import { injectRelayLink } from './badge.ts'
-import { assertTrustedAuthority, localAddresses, relayAuthorities } from './fence.ts'
-import { HarnessSession } from './harness-session.ts'
+import { assertTrustedAuthority, isLoopbackAddress, localAddresses, relayAuthorities } from './fence.ts'
+import { HarnessSessionResolver } from './harness-session.ts'
 import { advertise } from './mdns.ts'
 import { relayStateDir } from './paths.ts'
-import { installSettingsSection } from './settings-section.ts'
+import { followSettings } from './settings-section.ts'
 import { RELAY_PREFIX } from './routes.ts'
 import { injectSecureContextShim } from './secure-context.ts'
 import { startListener, type RelayRuntime } from './server.ts'
 import { RelayStore } from './state.ts'
 import { certificateSans, loadCertificate } from './tls.ts'
 
-export { Config } from './config.ts'
-export type { CompatConfig, PrivilegedPolicy, TlsMode } from './config.ts'
+export { Config, plainConfig } from './config.ts'
+export type { CompatConfig, ConfigSchema, PrivilegedPolicy, TlsMode } from './config.ts'
 
 /** Stable Cordis plugin name. */
 export const name = 'relay'
 
 /** The harness web server this relay fronts. */
 export const inject = ['webServer']
+
+/**
+ * The plugin object the Cordis loader registers, and the only reason this
+ * module has a default export.
+ *
+ * The loader normalizes a module's exports down to a single plugin object —
+ * `unwrapExports` is `exports.default ?? exports` — and then caches the
+ * configuration schema off **that** object, as `{ name, callback, fibers,
+ * Config: plugin.Config }`. The harness's settings plane reads it back with
+ * `entry.fiber.runtime.Config` to decide whether an entry is an editable
+ * namespace at all.
+ *
+ * A module that exports a bare `apply` **function** therefore has no `.Config`
+ * for anyone to find, and its entry is invisible to the Plugins page no matter
+ * how correct the rest is: the Host serves no namespace, and the browser card
+ * has nothing to attach to. Verified against dsh 0.1.7-rc.2, where this plugin
+ * with only the named exports contributes **zero** namespaces to
+ * `settings/describe`.
+ */
+export default { name, inject, apply, Config }
 
 /** The relay's own logging, degraded to the console when no logger is mounted. */
 function loggerFor(ctx: Context): { info: (message: string) => void, warn: (message: string) => void } {
@@ -65,35 +85,62 @@ function loggerFor(ctx: Context): { info: (message: string) => void, warn: (mess
  * @param ctx - plugin context; `ctx.webServer` is the harness listener to front.
  * @param config - resolved configuration.
  */
-export function apply(ctx: Context, config: Config): void {
-  assertCoherent(config)
-  for (const entry of [...config.trustedHosts, ...config.publicHostnames]) assertTrustedAuthority(entry)
+export function apply(ctx: Context, config: ConfigSchema): void {
+  const initial = plainConfig(config)
+  assertCoherent(initial)
+  for (const entry of [...initial.trustedHosts, ...initial.publicHostnames]) assertTrustedAuthority(entry)
 
-  // The relay is a fence in front of a loopback server. If the harness is
-  // already answering the network itself, the relay is decoration in front of
-  // an open door — and the operator almost certainly still has the old
-  // unauthenticated LAN patch applied. Fail the load loudly rather than
-  // implying a protection that is not there.
-  if (ctx.webServer.host === '0.0.0.0') {
-    throw new Error(
-      'dsh-relay: the harness web server is bound to 0.0.0.0, so it is already reachable without '
-      + 'authentication and this relay would protect nothing. Remove the webserver row override that '
-      + 'sets host: 0.0.0.0 (the DSH Mobile LAN patch) and restart.',
-    )
-  }
+  assertFrontable(ctx.webServer)
 
   const log = loggerFor(ctx)
 
   ctx.effect(() => {
     const supervisor = new Supervisor(ctx, log)
-    let source = (): Config => config
-    installSettingsSection(ctx, Config, config, {
-      setSource: (current) => { source = current },
-      onChange: () => { supervisor.apply(source()) },
-    })
-    supervisor.apply(source())
+    // The schema resolves each `.volatile()` field to a live handle, so the
+    // running configuration is read through them on every use rather than
+    // captured once. An edit swaps the values under these handles, and the
+    // loader's notification is what turns that into a rebind.
+    const read = (): Config => plainConfig(config)
+    followSettings(ctx, () => { supervisor.apply(read()) })
+    supervisor.apply(read())
     return async () => { await supervisor.stop() }
   }, 'dsh-relay: listeners')
+}
+
+/**
+ * Refuse to stand in front of a harness that does not need — or cannot take —
+ * a relay.
+ *
+ * The relay is a fence in front of a loopback server. If the harness already
+ * answers the network itself, the relay is decoration in front of an open
+ * door: an older harness could be rebound to `0.0.0.0` by the old DSH
+ * Mobile LAN patch, and from 0.2.1 the web server binds any concrete interface
+ * address it is given. Either way the operator would be told the harness is
+ * protected when it is not, so the load fails loudly instead.
+ *
+ * A loopback harness serving TLS is refused for a plainer reason: the relay
+ * terminates TLS itself and forwards plain HTTP over loopback, which a TLS
+ * listener cannot answer.
+ * @param webServer - the harness listener this relay would front.
+ * @param webServer.host - its configured bind address.
+ * @param webServer.protocol - its protocol, on harnesses that can serve TLS.
+ * @throws {Error} naming what to change.
+ */
+function assertFrontable(webServer: { readonly host: string, readonly protocol?: string }): void {
+  if (!isLoopbackAddress(webServer.host)) {
+    throw new Error(
+      `dsh-relay: the harness web server is bound to ${webServer.host}, so it is already reachable without `
+      + 'going through this relay, which would protect nothing. Remove the webserver row override that '
+      + 'sets its host (the DSH Mobile LAN patch sets 0.0.0.0) so the harness stays on 127.0.0.1, and restart.',
+    )
+  }
+  if (webServer.protocol === 'https:') {
+    throw new Error(
+      'dsh-relay: the harness web server is configured with tls, but the relay terminates TLS itself and '
+      + 'forwards plain HTTP over loopback. Remove tls from the webserver row and configure the relay\'s '
+      + 'own `tls` instead.',
+    )
+  }
 }
 
 /**
@@ -186,6 +233,18 @@ async function start(
   config: Config,
   log: { info: (message: string) => void, warn: (message: string) => void },
 ): Promise<RunningRelay> {
+  // The web server reports `port` as undefined until it has bound (0.2.1
+  // widened the type for a zero config, which asks the operating system for
+  // one). The relay proxies to one concrete port, so a mount that precedes the
+  // bind is a harness ordering change to fail loudly about, not forward nowhere.
+  const upstreamPort = ctx.webServer.port
+  if (upstreamPort === undefined) {
+    throw new Error(
+      'dsh-relay: the harness web server has not bound a port yet, so the relay has no upstream '
+      + 'to proxy to. This is a mount-ordering change in the harness, not a configuration error.',
+    )
+  }
+
   const dir = relayStateDir(ctx, config.stateDir)
   const store = await RelayStore.open(dir)
   const auth = new Authenticator(store, config)
@@ -199,20 +258,30 @@ async function start(
     sans,
     existing: store.state.certificate,
   })
-  if (material !== undefined && material.record.fingerprint !== store.state.certificate?.fingerprint) {
+  // A same-key re-issue keeps the fingerprint but moves the covered
+  // addresses, so persist the record when either changed — or the next start
+  // re-issues for nothing against a record that no longer describes the file.
+  const previousCertificate = store.state.certificate
+  if (material !== undefined
+    && (material.record.fingerprint !== previousCertificate?.fingerprint
+      || material.record.sans.join(',') !== previousCertificate?.sans.join(','))) {
     await store.update((draft) => { draft.certificate = material.record })
   }
 
   // Harness 0.1.2 authenticates its whole `/api` surface, and the relay strips
   // the client's own cookie on the way upstream — so without a session of its
-  // own every proxied request is answered 401. An older harness keeps no such
-  // secret, and needs none; that is the only case where this is absent.
-  const session = await HarnessSession.load(ctx)
-  if (session === undefined) {
+  // own every proxied request is answered 401. The secret is read from the
+  // request path, not once here: on a cold start it may not exist yet, and the
+  // first request after it does must already carry it.
+  let missedAtStart = false
+  const session = new HarnessSessionResolver(ctx, () => {
+    if (missedAtStart) log.info('harness browser session is available; proxied requests now authenticate')
+  })
+  if (await session.current() === undefined) {
+    missedAtStart = true
     log.info(
-      'no harness browser-session secret found; forwarding unauthenticated. That is correct for a '
-      + 'harness before 0.1.2. On 0.1.2 or later every proxied request will be answered 401 — '
-      + 'start `dsh web` once so it creates the secret, then reload this plugin.',
+      'no harness browser-session secret yet; requests are forwarded unauthenticated until the harness '
+      + 'writes it, and each one looks again, so no reload is needed.',
     )
   }
 
@@ -221,7 +290,7 @@ async function start(
     config,
     target: {
       host: '127.0.0.1',
-      port: ctx.webServer.port,
+      port: upstreamPort,
       timeoutMs: config.proxyTimeoutMs,
       session,
     },
@@ -279,7 +348,7 @@ async function start(
   const reachable = ['127.0.0.1', ...localAddresses()]
     .map(address => `${scheme}://${address}:${String(primary.port)}`)
     .join(' ')
-  log.info(`listening on ${reachable} (harness on 127.0.0.1:${String(ctx.webServer.port)})`)
+  log.info(`listening on ${reachable} (harness on 127.0.0.1:${String(upstreamPort)})`)
   if (material === undefined) {
     log.warn('serving plaintext: anything on the network path can read this traffic and the credentials on it')
   }

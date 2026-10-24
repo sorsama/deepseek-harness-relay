@@ -7,7 +7,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { Authenticator } from '../src/auth/index.ts'
-import { Config, assertCoherent, type Config as RelayConfig } from '../src/config.ts'
+import { Config, assertCoherent, plainConfig, type Config as RelayConfig } from '../src/config.ts'
+import { isPrivateAddress, localAddresses } from '../src/fence.ts'
 import { RelayStore } from '../src/state.ts'
 
 const NOW = 1_700_000_000_000
@@ -15,9 +16,17 @@ const NOW = 1_700_000_000_000
 let dir: string
 let store: RelayStore
 
-/** A resolved config with the schema's own defaults applied. */
+/**
+ * A resolved config, in the plain values the plugin consumes.
+ *
+ * The schema resolves every `.volatile()` field to a live handle (see
+ * `plainConfig`), so a test that used the schema's raw output would be handing
+ * the plugin handles where it expects values. Going through `plainConfig` is
+ * what the plugin itself does, and it is the only way these assertions are
+ * about the relay's behaviour rather than about schemastery's.
+ */
 function configFor(overrides: Partial<RelayConfig> = {}): RelayConfig {
-  return Config({ stateDir: dir, ...overrides }) as RelayConfig
+  return plainConfig(Config({ stateDir: dir, ...overrides }) as Parameters<typeof plainConfig>[0])
 }
 
 beforeEach(async () => {
@@ -173,6 +182,43 @@ describe('Authenticator', () => {
       const code = auth.pairing.issue(8, 300_000, NOW)
       await auth.pair({ code: code.code, name: 'Pixel', address: '203.0.113.7' }, NOW)
       expect(auth.identify({ headers: {}, address: '203.0.113.7', local: false }, NOW).credential).toBe('none')
+      auth.dispose()
+    })
+
+    it('never grants loopback, which stands for every client of a proxy on this machine', async () => {
+      // A pairing claimed through Funnel or nginx on this machine arrives from
+      // 127.0.0.1. Granting that address would admit everyone the proxy
+      // serves, uncredentialed, for the life of the grant.
+      const auth = new Authenticator(store, configFor())
+      const code = auth.pairing.issue(8, 300_000, NOW)
+      await auth.pair({ code: code.code, name: 'Pixel', address: '127.0.0.1' }, NOW)
+      expect(store.state.grants['127.0.0.1']).toBeUndefined()
+      const proxied = { 'x-forwarded-for': '198.51.100.4' }
+      expect(auth.identify({ headers: proxied, address: '127.0.0.1', local: true }, NOW).credential).toBe('none')
+      auth.dispose()
+    })
+
+    it('never grants an address this machine holds, which every NAT\'d container shares', async () => {
+      const own = localAddresses().find(isPrivateAddress)
+      if (own === undefined) return
+      const auth = new Authenticator(store, configFor())
+      const code = auth.pairing.issue(8, 300_000, NOW)
+      await auth.pair({ code: code.code, name: 'Pixel', address: own }, NOW)
+      expect(store.state.grants[own]).toBeUndefined()
+      expect(auth.identify({ headers: {}, address: own, local: false }, NOW).credential).toBe('none')
+      auth.dispose()
+    })
+
+    it('stops honouring a loopback grant an earlier release recorded', async () => {
+      const auth = new Authenticator(store, configFor())
+      const code = auth.pairing.issue(8, 300_000, NOW)
+      const paired = await auth.pair({ code: code.code, name: 'Pixel', address: '192.168.1.9' }, NOW)
+      if (paired === undefined || paired === 'locked-out') throw new Error('pairing must succeed')
+      await store.update((draft) => {
+        draft.grants['127.0.0.1'] = { address: '127.0.0.1', deviceId: paired.device.id, createdAt: NOW, expiresAt: NOW + 60_000 }
+      })
+      const proxied = { 'x-forwarded-for': '198.51.100.4' }
+      expect(auth.identify({ headers: proxied, address: '127.0.0.1', local: true }, NOW).credential).toBe('none')
       auth.dispose()
     })
 

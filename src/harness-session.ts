@@ -100,8 +100,7 @@ export class HarnessSession {
    * Load the harness's cookie-signing secret.
    *
    * @param ctx - plugin context; `ctx.credentials` is the harness's own store.
-   * @returns a minter, or undefined when this harness keeps no such secret —
-   *   which is every release before 0.1.2, where nothing needed one.
+   * @returns a minter, or undefined when the store holds no such secret yet.
    */
   static async load(ctx: Context): Promise<HarnessSession | undefined> {
     const credentials = ctx.get('credentials') as undefined | {
@@ -138,5 +137,78 @@ export class HarnessSession {
     }), 'utf8'))
     const signature = encodeBase64Url(createHmac('sha256', this.secret).update(body).digest())
     return `${cookieName(authority)}=v1.${body}.${signature}`
+  }
+}
+
+/** Supplies the harness browser session a forwarded request presents. */
+export interface HarnessSessionSource {
+  /**
+   * The `Cookie` header value for [authority], or undefined while the harness
+   * has no secret for the relay to sign with.
+   * @param authority - the upstream `host:port` this request will carry.
+   * @returns one `name=value` pair, or undefined when unauthenticated.
+   */
+  cookieFor(authority: string): Promise<string | undefined>
+}
+
+/**
+ * The relay's live handle on the harness browser session, resolved from the
+ * request path rather than once at startup.
+ *
+ * On a cold start this plugin mounts before `dsh-client-connection` has
+ * written its signing secret, and the credentials service itself may attach
+ * later still. A single read at startup froze that miss into every request for
+ * the life of the process: the relay's own pages kept working while every
+ * proxied call was answered 401, which a phone reports as a stream that would
+ * not open. Here a miss is never remembered — each request that finds no
+ * session reads the store again, so the first request after the secret exists
+ * already carries it.
+ *
+ * A found secret is kept for the life of this relay. That matches the harness:
+ * the connection loads the secret once when it activates and verifies every
+ * cookie against that copy, so the stored record changing under a running
+ * harness would not change what it accepts either.
+ */
+export class HarnessSessionResolver implements HarnessSessionSource {
+  #session: HarnessSession | undefined
+  #pending: Promise<HarnessSession | undefined> | undefined
+
+  /**
+   * @param ctx - plugin context; `ctx.credentials` is the harness's own store.
+   * @param onAvailable - called once, when the secret is first found.
+   */
+  constructor(private readonly ctx: Context, private readonly onAvailable: () => void = () => undefined) {}
+
+  /** Whether a session has been found, so forwarded requests authenticate. */
+  get available(): boolean {
+    return this.#session !== undefined
+  }
+
+  /**
+   * The current minter, reading the store while none has been found.
+   * @returns the minter, or undefined while the harness has no such secret.
+   */
+  async current(): Promise<HarnessSession | undefined> {
+    if (this.#session !== undefined) return this.#session
+    // One read in flight at a time: a page load fans out into dozens of
+    // requests at once, and every one of them would otherwise read the store.
+    this.#pending ??= HarnessSession.load(this.ctx)
+      .catch(() => undefined)
+      .finally(() => { this.#pending = undefined })
+    const found = await this.#pending
+    if (found !== undefined && this.#session === undefined) {
+      this.#session = found
+      this.onAvailable()
+    }
+    return this.#session
+  }
+
+  /**
+   * The `Cookie` header value for [authority].
+   * @param authority - the upstream `host:port` this request will carry.
+   * @returns one `name=value` pair, or undefined while unauthenticated.
+   */
+  async cookieFor(authority: string): Promise<string | undefined> {
+    return (await this.current())?.cookieFor(authority)
   }
 }
