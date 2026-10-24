@@ -1,78 +1,93 @@
 # Security
 
-## The thing to understand first
+## Start here
 
-The DeepSeek Harness is a coding agent. It runs shell commands, reads and writes files, and can install software — on the machine it is running on. **Anyone who authenticates to this relay can do all of that.** There is no lesser tier of access to grant: the harness's own maintainers make the same point when they refuse `--host 0.0.0.0` because it "would expose remote code execution to the network".
+DeepSeek Harness is a coding agent. It runs shell commands, reads and writes files, and installs software on the machine it runs on. **Anyone who signs in to this relay can do all of that.** There's no smaller level of access to hand out. The harness's own maintainers say the same thing when they refuse `--host 0.0.0.0`, because it "would expose remote code execution to the network".
 
-So the question this plugin answers is not "how do we restrict what a remote user can do" — it is "how do we make sure the remote user is you".
+So the relay doesn't try to limit what a remote user can do. Its job is to make sure the remote user is you.
 
-## What the relay defends against
+## What the relay protects against
 
-**An unauthenticated stranger on your network.** The harness's `/api` fence checks the `Host` header for DNS rebinding and cross-site requests, and says outright that it "is not an auth layer". Without a credential, the relay answers 403 before a request reaches the harness at all.
+### A stranger on your network
 
-**A rebound web page.** Proxying rewrites `Host` to the loopback authority, which is exactly what the harness's fence exists to detect — so the relay carries that fence itself, and applies it *before* the rewrite and before any credential is read. A page at `evil.example` that points a short-TTL DNS record at your relay still sends `Host: evil.example`, and the relay refuses it. This is why `trustedHosts` and `publicHostnames` matter: the relay only answers to the authorities it was told about.
+The harness checks the `Host` header on its `/api` routes to stop DNS rebinding and cross-site requests, but its own code says that check "is not an auth layer". The relay adds the missing sign-in. A browser signs in with the password and gets a signed `HttpOnly; SameSite=Strict` cookie, and an app pairs and gets a bearer token. A request without a valid credential gets a 403 and never reaches the harness.
 
-**A reverse proxy on loopback seating the internet as you.** Tailscale Funnel, Serve, nginx, and Caddy connect from `127.0.0.1`, where the relay would otherwise ask for nothing. A loopback request carrying a forwarding header (`Forwarded`, `X-Forwarded-*`, `X-Real-IP`, `Via`) is therefore classified as network traffic: it must present a credential, and it is rate limited. The header is a tell, not a proof — a proxy that strips them is indistinguishable from the operator's browser, which is why the README says to point a proxy at a non-loopback address instead.
+### A malicious web page using DNS rebinding
 
-**Credential replay after you notice.** Every device is individually revocable, and "sign out everywhere" rotates the signing key, which invalidates every cookie and every device token at once.
+When the relay forwards a request, it rewrites `Host` to the loopback address. That's exactly what the harness's `Host` check is built to catch, so the relay runs that check itself, before the rewrite and before it reads any credential.
 
-**Brute force.** Sign-ins and pairing attempts are counted per source address and locked out; every request is rate limited per address.
+Say a page at `evil.example` points a short-lived DNS record at your relay. The browser still sends `Host: evil.example`, and the relay refuses it. That's why `trustedHosts` and `publicHostnames` matter: the relay only answers to the names you've told it about.
 
-**Credentials at rest.** The password is a salted scrypt hash. Bearer tokens are stored only as keyed hashes — the token itself is shown once, at pairing, and never again. State and the private key are written mode `0600` into their own directory rather than into shared harness storage.
+### A reverse proxy on loopback letting the internet in as you
 
-**A plugin you did not audit becoming reachable.** The harness's Connection carrier lets any plugin register an RPC channel of its own, and several are declared loopback-only. The `Host` rewrite would promote all of them. The relay refuses any write method addressed to a path it does not know about, so that promotion is limited to `/api` and anything the operator names in `extraProxyPaths`.
+Tailscale Funnel, Tailscale Serve, nginx, and Caddy connect from `127.0.0.1`, and the relay normally asks loopback for nothing. So when a loopback request carries a forwarding header (`Forwarded`, `X-Forwarded-*`, `X-Real-IP`, or `Via`), the relay treats it as network traffic: it needs a credential and counts against the rate limit.
 
-## What the relay does not defend against
+A forwarding header is a hint, though, and a proxy can strip it. A proxy that does looks exactly like your own browser. That's why the [configuration guide](CONFIGURATION.md#reverse-proxies) says to point any proxy at a non-loopback address.
 
-**A weak password.** Ten characters is the enforced minimum; that is a floor, not a recommendation.
+### A stolen credential, once you notice
 
-**Your own machine being compromised.** Loopback requests are treated as the operator, because on that machine the attacker already has what the relay protects.
+You can revoke each device on its own. "Sign out everywhere" rotates the signing key, which invalidates every browser session and every device token at once.
 
-**Plaintext, if you choose it.** `tls: off` and the plain compatibility listener send credentials and traffic in the clear. Anything on the network path can read them.
+### Password guessing
 
-**A shared or spoofed source address.** See below.
+Sign-in and pairing attempts are counted per source address, and too many failures lock that address out. Every request is also rate limited per address.
 
-## Address grants: read this before enabling them
+### Credentials stored on disk
 
-DSH Mobile up to 0.7.0 sends no `Authorization` header, no cookies, and no `Origin`. There is no field in those releases that can carry a credential, so the only facts the relay can observe about such a client are the port it connected to and the address it came from.
+The password is stored as a salted scrypt hash. Device tokens are stored only as keyed hashes; you see the token once, when you pair, and the relay never shows it again. The relay's state and private key are written with mode `0600` into their own folder, separate from the harness's shared storage. (On Windows, mode `0600` has no effect; see [Certificates](CONFIGURATION.md#certificates).)
 
-**DSH Mobile 0.8.0 and later do not need this.** They pair, hold a bearer token, and pin this relay's key. If every client you use is on 0.8.0, set `compat.addressGrants: false` and skip the rest of this section.
+### Other plugins you haven't reviewed
 
-So `compat.addressGrants` accepts requests from an address a paired device was last seen on. **A source address is not authentication.** Specifically:
+Any harness plugin can register its own RPC channel, and several of them are meant for loopback only. Because the relay rewrites `Host` to loopback, it could accidentally expose all of them. To prevent that, the relay refuses any write request to a path it doesn't know about. Only `/api` and whatever you list in `extraProxyPaths` get through.
 
-- **NAT** — every device behind the same router shares one public address, and every subscriber behind carrier-grade NAT shares one too. The relay therefore refuses to grant a non-private address at all, which means grants do not work over a port-forwarded connection.
-- **DHCP** — a lease expires and the granted `192.168.1.42` becomes a guest's laptop.
-- **IPv6 privacy extensions** — Android rotates its temporary address, roughly daily, and the grant dies with it.
-- **Network changes** — moving between Wi-Fi and cellular gets a new address and needs a new pairing.
-- **Same-segment spoofing** — anything on the same Wi-Fi can ARP-spoof and source-spoof its way into a granted address.
-- **Other apps on the same phone** — they share the address, and so share the grant.
+## What the relay doesn't protect against
 
-The relay narrows this as far as it can: private ranges only, a TTL, revoked with the device that created it, and **never privileged** — an address-granted client cannot reach settings, credentials, model discovery, or the host directory pickers no matter how `privilegedMethods` is configured.
+- **A weak password.** The minimum is 10 characters. Treat that as the lowest you can go, not a target.
+- **A compromised harness machine.** The relay treats loopback as you, because anyone already on that machine has everything the relay protects.
+- **Plain HTTP, if you turn it on.** `tls: off` and the plain compatibility listener send credentials and traffic unencrypted. Anything on the network path can read them.
+- **A shared or spoofed network address.** See the next section.
 
-It is enabled by default only because the alternative available to an older client is the fully unauthenticated LAN patch, which is strictly worse. Set `compat.addressGrants: false` as soon as every client you use can hold a token.
+## Address grants
 
-Turning grants off does **not** turn off `compat.plainPort`. That listener accepts a bearer token as readily as a grant, so it stays usable by a paired client that cannot pin a certificate — the token travels in the clear on it, which is your call to make, the same as `tls: off`.
+DSH Mobile 0.7.0 and earlier send no `Authorization` header, no cookies, and no `Origin`. There's nowhere in those versions to put a credential, so the only things the relay can see about them are the port they connect to and the address they come from.
 
-## The privileged method set
+DSH Mobile 0.8.0 and later don't need address grants. They pair, keep a real token, and pin the relay's key. If all your apps are on 0.8.0, set `compat.addressGrants: false` and you can skip the rest of this section.
 
-The harness pins these to loopback, and the relay keeps its own copy of the list because the `Host` rewrite lifts the upstream pin:
+With `compat.addressGrants` on, the relay accepts requests from the address a paired device was last seen on. **A network address is not authentication.** Here's why:
 
-```
-agentPreset.read  agentPreset.copy  agentPreset.openDocument  agentPreset.remove
-host.pickDirectory  host.openPath
-settings.describe  settings.openDocument  settings.update  settings.replace  settings.mutate
-credentials.describe  credentials.set  credentials.unset
-llm.discoverModels
-```
+- **NAT.** Every device behind the same router shares one public address, and with carrier-grade NAT, so do many other customers. The relay won't grant a public address at all, which means grants don't work over port forwarding.
+- **DHCP.** A lease expires, and the trusted `192.168.1.42` becomes a guest's laptop.
+- **IPv6 privacy addresses.** Android rotates its temporary address about once a day, and the grant goes with it.
+- **Changing networks.** Switching between Wi-Fi and mobile data gives the phone a new address, so you have to pair again.
+- **Spoofing.** Anything on the same Wi-Fi can use ARP and source spoofing to take over a trusted address.
+- **Other apps on the same phone.** They share the phone's address, so they share the grant too.
 
-They are privileged for two reasons. The settings and credential domains mutate your configuration and secret store, and reading them is equally sensitive — `credentials.describe` reports whether an arbitrary environment variable is configured and where from. `llm.discoverModels` makes the host issue a request to a URL the caller chose and reports what came back, which is a probe for whatever your machine can reach and the client cannot.
+The relay limits grants as much as it can. They only work for private addresses, they expire, they're removed when you revoke the device that created them, and they **never** reach privileged methods, whatever `privilegedMethods` is set to.
 
-`privilegedMethods: allow-authenticated` (the default) lets a password or device-token client reach them, on the reasoning that a real credential is what the upstream comment was waiting for. `loopback-only` keeps them on your machine. Address grants never reach them.
+Grants are on by default only because the alternative for an older app is the LAN patch, which has no authentication at all and is strictly worse. Turn them off as soon as every app you use can hold a token.
+
+Turning grants off doesn't turn off `compat.plainPort`. That listener accepts device tokens too, so a paired app that can't pin a certificate can still use it. The token travels unencrypted there. That's your call to make, the same as with `tls: off`.
+
+## Privileged methods
+
+Some harness API endpoints are more sensitive than the rest. The relay keeps them to the harness machine unless you allow otherwise:
+
+- **Settings:** reading and changing the harness configuration.
+- **Credentials:** reading and changing the secret store. Even reading is sensitive, since `credentials/describe` reports whether any environment variable is set and where it comes from.
+- **Model discovery** (`llm/discoverModels`): makes the harness machine send a request to a URL the caller picks and report what came back. That lets a remote caller probe anything your machine can reach.
+- **Host desktop and files:** the folder picker, creating folders, and opening a workspace path on the desktop.
+- **Agent preset authoring:** reading, copying, and deleting the presets that decide which plugins a session runs.
+
+The exact list is in [`src/privileged.ts`](../src/privileged.ts). It includes the names from both the current harness API and the older 0.1.1 one, so one relay build works against either.
+
+Up to harness 0.1.1, the harness kept these endpoints to loopback itself, and the relay copied that list so its `Host` rewrite couldn't undo the restriction. Harness 0.1.2 removed that list: anyone with a session can now reach the whole API. The relay's list is now its own policy, and it's the only thing between a paired phone and your credential store.
+
+`privilegedMethods: allow-authenticated` (the default) lets anyone signed in with a password or device token reach these endpoints. `loopback-only` keeps them on the harness machine. Devices let in by address grant never reach them.
 
 ## Reporting a vulnerability
 
-Report privately through **Report a vulnerability** on this repository's Security tab, or by email to **sor@zyphite.com**. Please do not open a public issue.
+Report it privately through **Report a vulnerability** on this repository's Security tab, or by email to **sor@zyphite.com**. Please don't open a public issue.
 
-Include what an attacker can do, the steps to reproduce, the relay and harness versions, and how the client was connected.
+Include what an attacker could do, steps to reproduce, the relay and harness versions, and how the client was connected.
 
-The facts documented above — that authentication grants shell access, and that address grants are weak — are the design, not vulnerability reports. A way *around* the fence, the credential check, or the privileged-method gate is.
+Two things described above are part of the design, not vulnerabilities: signing in gives shell-level access, and address grants are weak. A way around the `Host` check, the credential check, or the privileged-method restriction is a vulnerability, and we want to hear about it.
