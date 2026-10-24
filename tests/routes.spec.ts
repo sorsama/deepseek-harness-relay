@@ -16,7 +16,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { Authenticator } from '../src/auth/index.ts'
 import { injectRelayLink } from '../src/badge.ts'
-import { Config, type Config as RelayConfig } from '../src/config.ts'
+import { Config, plainConfig } from '../src/config.ts'
 import { startListener, type RelayListener, type RelayRuntime } from '../src/server.ts'
 import { injectSecureContextShim } from '../src/secure-context.ts'
 import { RelayStore } from '../src/state.ts'
@@ -68,12 +68,12 @@ beforeEach(async () => {
   const upstreamAddress = upstream.address()
   const upstreamPort = typeof upstreamAddress === 'object' && upstreamAddress !== null ? upstreamAddress.port : 0
 
-  const config = Config({ stateDir: dir, port: 0, tls: 'off', mdns: false }) as RelayConfig
+  const config = plainConfig(Config({ stateDir: dir, port: 0, tls: 'off', mdns: false }) as Parameters<typeof plainConfig>[0])
   auth = new Authenticator(store, config)
   const runtime: RelayRuntime = {
     auth,
     config,
-    target: { host: '127.0.0.1', port: upstreamPort, timeoutMs: 5000 },
+    target: { host: '127.0.0.1', port: upstreamPort, timeoutMs: 5000, session: () => undefined },
     log: () => undefined,
   }
   relay = await startListener({ runtime, bind: '127.0.0.1', port: 0, authorities: ['127.0.0.1', 'localhost'] })
@@ -295,10 +295,10 @@ describe('a reverse proxy on loopback is not the operator', () => {
   it('throttles the proxy, which the operator never is', async () => {
     const upstreamAddress = upstream.address()
     const upstreamPort = typeof upstreamAddress === 'object' && upstreamAddress !== null ? upstreamAddress.port : 0
-    const config = Config({ stateDir: dir, port: 0, tls: 'off', mdns: false, rateLimitPerMinute: 1 }) as RelayConfig
+    const config = plainConfig(Config({ stateDir: dir, port: 0, tls: 'off', mdns: false, rateLimitPerMinute: 1 }) as Parameters<typeof plainConfig>[0])
     const throttled = new Authenticator(store, config)
     const listener = await startListener({
-      runtime: { auth: throttled, config, target: { host: '127.0.0.1', port: upstreamPort, timeoutMs: 5000 }, log: () => undefined },
+      runtime: { auth: throttled, config, target: { host: '127.0.0.1', port: upstreamPort, timeoutMs: 5000, session: () => undefined }, log: () => undefined },
       bind: '127.0.0.1',
       port: 0,
       authorities: ['127.0.0.1', 'localhost'],

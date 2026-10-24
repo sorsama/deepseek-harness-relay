@@ -17,7 +17,7 @@
  * @module dsh-relay/tls
  */
 
-import { X509Certificate, createHash } from 'node:crypto'
+import { X509Certificate, createHash, createPublicKey } from 'node:crypto'
 import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { localAddresses } from './fence.ts'
@@ -79,15 +79,21 @@ export function certificateSans(publicHostnames: readonly string[]): string[] {
 
 /**
  * Generate a certificate and write it beside the state file.
+ *
+ * When `existingKey` is supplied the certificate is re-issued on that key
+ * rather than minting a new identity: paired devices pin the SPKI of the
+ * key (`spkiFingerprint`), not the certificate, so a re-issue preserves
+ * every pin and only the covered addresses change.
  * @param dir - the relay state directory.
  * @param sans - subject alternative names to cover.
+ * @param existingKey - the stored private key (PEM) to re-issue on, when present.
  * @returns the generated material.
  */
-async function generate(dir: string, sans: readonly string[]): Promise<TlsMaterial> {
+async function generate(dir: string, sans: readonly string[], existingKey?: string): Promise<TlsMaterial> {
   const { default: selfsigned } = await import('selfsigned') as unknown as { default: SelfSigned }
   const notBefore = new Date()
   const notAfter = new Date(notBefore.getTime() + VALIDITY_DAYS * 86_400_000)
-  const pems = await selfsigned.generate([{ name: 'commonName', value: 'dsh-relay' }], {
+  const options: Record<string, unknown> = {
     keyType: 'ec',
     curve: 'P-256',
     algorithm: 'sha256',
@@ -104,7 +110,15 @@ async function generate(dir: string, sans: readonly string[]): Promise<TlsMateri
           : { type: SAN_DNS, value })),
       },
     ],
-  })
+  }
+  if (existingKey !== undefined) {
+    const publicKey = createPublicKey(existingKey)
+    options.keyPair = {
+      privateKey: existingKey,
+      publicKey: publicKey.export({ type: 'spki', format: 'pem' }),
+    }
+  }
+  const pems = await selfsigned.generate([{ name: 'commonName', value: 'dsh-relay' }], options)
   await mkdir(dir, { recursive: true, mode: 0o700 })
   await writeFile(join(dir, CERT_FILE), pems.cert, { mode: SECRET_MODE })
   await writeFile(join(dir, KEY_FILE), pems.private, { mode: SECRET_MODE })
@@ -126,6 +140,12 @@ async function generate(dir: string, sans: readonly string[]): Promise<TlsMateri
  * A generated certificate is regenerated when it has expired or when the set
  * of addresses it covers has changed — a laptop that moved networks would
  * otherwise present a certificate naming an address it no longer has.
+ *
+ * A regeneration **re-issues on the stored key** instead of minting a new
+ * one, whenever the key file is still present: paired devices pin the key's
+ * SPKI, and a new key would orphan every pin the moment the address set
+ * changed (the 2026-10-19 outage, issue #114). Only first boot — no key on
+ * disk yet — creates a new identity.
  *
  * The private key is written mode 0600. **That is a no-op on Windows**, where
  * the file inherits the ACL of the harness home directory; a deployment that
@@ -180,5 +200,14 @@ export async function loadCertificate(options: {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
     }
   }
-  return generate(options.dir, options.sans)
+  // Regenerate. The key file, when present, is the stored identity: re-issue
+  // on it so the pin (the key's SPKI) survives the new address set or the
+  // lost cert file. Only a missing key — first boot — mints a new identity.
+  let existingKey: string | undefined
+  try {
+    existingKey = await readFile(join(options.dir, KEY_FILE), 'utf8')
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+  }
+  return generate(options.dir, options.sans, existingKey)
 }

@@ -49,7 +49,6 @@ const MODULE_TABLE = new Set([
   '@deepseek-ai/cordis',
   '@deepseek-ai/dsh-client-ui-slots',
   '@deepseek-ai/dsh-client-ui-primitives',
-  '@deepseek-ai/dsh-client-runtime/client',
 ])
 
 /** Virtual id keeping module CSS out of tsdown's own stylesheet pipeline. */

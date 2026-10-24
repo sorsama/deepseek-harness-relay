@@ -29,3 +29,5 @@ jobs:
       - name: the published entry points exist
         shell: bash
         run: test -f lib/index.js
+      - name: packing rebuilds a stale runtime
+        run: pnpm test:pack

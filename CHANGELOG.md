@@ -1,5 +1,153 @@
 # Changelog
 
+## 0.3.1
+
+Harness **0.2.1** support, and the relay no longer orphans paired devices when
+the set of addresses its self-signed certificate covers changes at start.
+
+DSH 0.2.1 refuses to start a plugin whose declared peer ranges do not admit the
+running harness. The 0.3.0 ranges stopped at `<0.2.1-0`, so 0.2.1-rc.2 stayed
+installed but was denied at profile startup — the relay never bound a port.
+
+### Fixed
+
+- **The harness peer ranges now admit the 0.2.1 line.** Each is
+  `^0.1.7-rc.2 || >=0.2.0-rc.1 <0.2.2-0`: the 0.1.7 release this build was
+  originally measured on, every 0.2.x up to but excluding 0.2.2. The plugin was
+  verified on 0.2.1-rc.2, not merely allowed to install.
+- **The client/host devDependencies moved to 0.2.1-rc.2** so the build and
+  typecheck run against the release it claims. `@deepseek-ai/dsh-client-runtime`
+  was dropped: 0.2.1 no longer publishes it, and the browser half never imported
+  it.
+- **A changed address set no longer orphans paired devices.** When the set of
+  local addresses covered by the self-signed certificate changed at start — a
+  VPN disconnecting, an IP moving — the relay re-issued with a *new* key.
+  Clients pin the SHA-256 of the key's SPKI, so every paired device hard-failed
+  as a certificate change until re-paired (the 2026-10-19 phone outage,
+  dsh-mobile issue #114). Re-issuance now reuses the stored key — a new
+  certificate on the same identity — and only a first boot, with no key on
+  disk, mints a new one. The cert record in the relay state now also persists
+  when only the covered addresses moved, so the next start does not re-issue
+  for nothing.
+
+### Verified on 0.2.1-rc.2
+
+- Profile boot: the relay binds, logs
+  `harness browser session is available; proxied requests now authenticate`,
+  and `/relay/health` answers `200` with `{"service":"dsh-relay","ok":true}`.
+- 125 tests, typecheck, and build pass against 0.2.1-rc.2. A new
+  `tests/compat.spec.ts` pins the peer ranges in both directions: every
+  verified harness release is admitted, and the next untested minor is refused.
+
+## 0.3.0
+
+Harness **0.1.7** support. The settings card works again, and the plugin's
+settings follow a live edit.
+
+**A 0.2.x relay cannot show its settings card on 0.1.7 at all.** The relay
+itself kept working — it loaded, bound its port, and proxied — which is what
+made this worth writing down: every failure below is silent, and the operator
+sees a working relay with no configuration page rather than an error.
+
+### Fixed
+
+- **The Plugins page served no namespace, so the card could never appear.**
+  From 0.1.7 the settings plane reads an entry's schema off the object the
+  Cordis loader registers — `entry.fiber.runtime.Config` — and the loader
+  normalizes a module's exports to `exports.default ?? exports` first. This
+  plugin exported a bare `apply` **function**; a function carries no `.Config`,
+  so `settings/describe` listed zero namespaces and the browser half had
+  nothing to attach to. Named exports are kept for compatibility, and the
+  schema now also rides a default export object, which is what the loader
+  reads.
+
+- **Every field needed `.volatile()`, and a schema without it has no page.**
+  0.1.7 builds the form with `volatileForm()`, which keeps only fields whose
+  nearest marked ancestor is volatile, and `describe()` drops any entry whose
+  form came back `undefined`. The schema now marks every form field volatile;
+  `stateDir` stays off the form, because the bundle patch derives it and an
+  editable absolute path in a browser form is a way to have the relay write its
+  state somewhere unexpected.
+
+- **The browser half used a client service that no longer exists.**
+  `settingsScope` was replaced by `configForms`, and the old name appears in no
+  0.1.7 client bundle — the bundle simply never loads, with no error anywhere.
+
+- **The card registered into a slot that no longer exists.**
+  `settings.plugin.item` was replaced by the Plugins page's `plugins.item`, and
+  the manifest's `dsh.client.inject` now names the packages that own it
+  (`-client-locale`, `-ui-plugin-manager`, `-ui-settings`) instead of
+  `-ui-settings-plugins`.
+
+- **The card drew its own frame.** The page now supplies the title button and
+  the disclosure, so the card renders only the form body via the shared
+  `SettingsForm` and `SettingsValueField`. The previous outer `<li>` with its
+  own header produced a doubled card whose inner button sat over the platform's
+  and swallowed its clicks.
+
+- **A settings edit did not reach the running relay.** The provider's
+  `settings.register(ns, schema, { base })` API is gone in 0.1.7; the namespace
+  is the entry id and the config arrives already resolved. Worse, the
+  replacement subscription was written against `settings.on`, which is
+  `undefined` on a Cordis `Service` — optional-chained into subscribing to
+  nothing, so an edit persisted to the profile patch and the listeners never
+  rebound. Events are a **context** facility (`ctx.on`), which is how
+  `dsh-api-remotes` forwards this same event. A listener now filters on this
+  entry's own namespace and drives the supervisor, so a port change rebinds
+  without a restart.
+
+- **A cold start forwarded unauthenticated for the life of the process.** The
+  relay mounts before `dsh-client-connection` has written its cookie-signing
+  secret, read it **once**, and cached that single miss — after which every
+  proxied request was answered 401 while the relay's own pages kept working, so
+  a phone reported "the stream would not open" rather than a missing
+  credential. The read is now per request, through a resolver that never
+  memoizes a miss, which is what the credentials provider's own contract asks
+  for: "Resolution is per call: consumers re-resolve at each operation and must
+  not cache across operations." A rotated secret is picked up the same way, and
+  the recovery is logged once. Deployments that carried a post-start script to
+  force a reload for this reason can drop it.
+
+  Measured on a real cold boot: the old build logged the miss and stayed
+  unauthenticated with the secret already on disk; the new one logs
+  `harness browser session is available; proxied requests now authenticate`
+  with no restart and no config edit.
+
+### Changed
+
+- `@deepseek-ai/schemastery` is `^3.18.4` (the release that has `.volatile()`),
+  `@deepseek-ai/cordis` is `>=4.0.4` (which re-exports the `Volatile` type),
+  and the client/host harness packages are aligned to `0.1.7-rc.2`.
+- The schema and the value diverge, so they are typed separately:
+  `ConfigSchema` describes the live handles the loader resolves, and `Config`
+  the plain values the plugin consumes. `plainConfig()` is the one boundary
+  between them, and it reads the handles on every use — which is exactly what
+  makes an edit visible to a running relay.
+- The settings section gained a `settings-card` test suite that pins the two
+  silent contracts above (the default export, and volatility per field). Both
+  were checked by mutation: removing the default export, or dropping
+  `.volatile()` from a single field, fails the suite.
+
+### Declared compatibility: 0.1.7 and 0.2.0
+
+The harness peer ranges are now `^0.1.7-rc.2 || >=0.2.0-rc.1 <0.2.1-0` rather
+than an open `>=0.1.7-rc.2`, so the two generations this build was actually
+verified against are the two it claims:
+
+- **0.1.7-rc.2** — the target of this release; the card, the live settings
+  follow, and the cold-start recovery were measured here.
+- **0.2.0-rc.1 through 0.2.0** — audited by comparing both installs file by
+  file, then driven end to end: the Host fence, password sign-in, session and
+  device credentials, pairing, revocation, HTTP proxying with the harness
+  session attached, and the WebSocket upgrade both with and without a
+  credential. 15 functional checks pass, and a non-loopback client is refused
+  without one.
+
+`<0.2.1-0` is deliberate rather than a caret: it excludes the next minor so an
+untested 0.3 does not install silently, while `0.2.0-rc.1`-and-later are
+covered because the two 0.2.0 release candidates were compared and share every
+file this plugin touches.
+
 ## 0.2.1
 
 ### Fixed

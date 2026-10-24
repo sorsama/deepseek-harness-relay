@@ -23,12 +23,18 @@ export interface UpstreamTarget {
   /**
    * Mints the harness browser session each forwarded request carries.
    *
-   * Absent against a harness older than 0.1.2, which required none. Against
-   * 0.1.2 and later its absence means every proxied request is answered 401,
-   * which the relay reports at startup rather than leaving to be discovered
-   * one refused request at a time.
+   * Read **per request**, not captured when the listener bound. A cold start
+   * mounts this plugin before `dsh-client-connection` has written its signing
+   * secret, and a value captured once would freeze that single miss into every
+   * later request — the failure mode where the relay's own pages keep working
+   * while every proxied call is answered 401, which reaches a phone as "the
+   * stream would not open".
+   *
+   * Returns undefined against a harness older than 0.1.2, which required none,
+   * and during the first moments of a cold start on 0.1.2 or later.
+   * @returns the minter, or undefined while the harness has no such secret.
    */
-  readonly session?: HarnessSession | undefined
+  session: () => HarnessSession | undefined
 }
 
 /** The authority the harness sees, and compares its own fence against. */
@@ -51,7 +57,7 @@ export function forward(req: IncomingMessage, res: ServerResponse, target: Upstr
       method: req.method ?? 'GET',
       path: req.url ?? '/',
       headers: upstreamHeaders(req.headers, loopbackAuthority(target), {
-        cookie: target.session?.cookieFor(loopbackAuthority(target)),
+        cookie: target.session()?.cookieFor(loopbackAuthority(target)),
       }),
       // Each proxied request gets its own socket rather than sharing the
       // global agent's pool, so one stalled streaming response cannot hold a
