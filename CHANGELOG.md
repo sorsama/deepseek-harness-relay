@@ -83,12 +83,18 @@ stay on 0.2, installed from its tag
 
 ### Verified
 
-- Harness **0.2.1-rc.3**, Windows, isolated home: cold start heals on the first
+On Windows, each against a real harness in an isolated home, installing the
+packed tarball:
+
+- **0.2.1-rc.3, 0.2.0-rc.2, and 0.1.7-rc.2**: the cold start heals on the first
   request; the web UI boots with the browser half active; the settings page
-  renders and a port edit rebinds without a restart; Host fence, pairing, key
-  pin, bearer token on `/api` and on the `/api/remote.mux` upgrade, and no
-  grant for the machine's own address.
-- 0.2.0-rc.2 and 0.1.7-rc.2: see the release notes.
+  renders, a switch stages without error, and a port edit rebinds the relay
+  without restarting the harness; the Host fence, pairing, the key pin, a
+  bearer token on `/api` and on the `/api/remote.mux` upgrade, and no grant on
+  the machine's own address.
+- **0.2.1-rc.3** additionally: password sign-in from the LAN, revocation, the
+  pin and password surviving a restart, and the refusal to front a harness
+  started with `--host <LAN address>`.
 
 Thanks to @snailium (#10), @makhammadzhanov (#6), @hazyumps (#12, #14), and
 @js-easy-school (#9) for the changes this release is built from, and to
