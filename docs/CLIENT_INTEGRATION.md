@@ -1,22 +1,22 @@
 # Client integration
 
-The contract a native client implements to authenticate against `dsh-relay`. Written for the [DSH Mobile](https://github.com/sorsama/deepseek-harness-mobile) Kotlin client, but nothing here is Android-specific.
+This is what a native app needs to do to sign in to `dsh-relay`. It was written for the [DSH Mobile](https://github.com/sorsama/deepseek-harness-mobile) Kotlin app, but nothing here is specific to Android.
 
-A client that implements this needs no compatibility mode: it holds a real credential, so it can use TLS, connect from any address, and reach the full API.
+An app that follows this document doesn't need any compatibility mode. It holds a real credential, so it can use HTTPS, connect from any address, and reach the full API.
 
-## What changes for the client
+## What changes for the app
 
-Three things, and only three:
+Compared with talking to the harness directly, an app needs three changes:
 
 1. Send `Authorization: Bearer <token>` on every `/api` request **and on both WebSocket upgrades**.
-2. Support `https://` as well as `http://`, and pin the certificate by SPKI when the relay is self-signed.
-3. Obtain the token once, by scanning a QR code or entering a passcode.
+2. Accept `https://` as well as `http://`, and pin the key (SPKI) when the relay uses a self-signed certificate.
+3. Get the token once, by scanning a QR code or entering a passcode.
 
-Everything else — the envelope format, the method set, the two downlinks, the 3-second handshake budget — is unchanged, because the relay forwards to the same harness.
+Everything else stays the same: the envelope format, the methods, the two downlinks, and the 3-second handshake budget. The relay forwards to the same harness.
 
-## The QR payload
+## The QR code
 
-A single JSON object, UTF-8, encoded directly into the QR. A scanner should check `kind` before doing anything with it.
+The QR code holds a single UTF-8 JSON object. Check `kind` before doing anything with it.
 
 ```json
 {
@@ -30,17 +30,17 @@ A single JSON object, UTF-8, encoded directly into the QR. A scanner should chec
 }
 ```
 
-| Field | Presence | Meaning |
+| Field | Present | Meaning |
 |---|---|---|
-| `v` | always `1` | Payload version. Refuse anything higher. |
-| `kind` | always | Discriminator; must equal `dsh-relay-pair`. |
-| `url` | always | Origin of the primary listener, scheme included. |
-| `plainUrl` | optional | Origin of the plain-HTTP compatibility listener, when one is running. A client that implements this document should ignore it and use `url`. |
-| `fingerprint` | optional | Base64 SHA-256 of the DER SubjectPublicKeyInfo. Absent when the relay serves plaintext. |
-| `code` | always | The single-use pairing code. |
-| `expiresAt` | always | Epoch milliseconds the code stops being claimable. |
+| `v` | Always `1` | Payload version. Refuse anything higher. |
+| `kind` | Always | Must equal `dsh-relay-pair`. |
+| `url` | Always | Origin of the main listener, including the scheme. |
+| `plainUrl` | Sometimes | Origin of the plain HTTP compatibility listener, if one is running. An app that follows this document should ignore it and use `url`. |
+| `fingerprint` | Sometimes | Base64 SHA-256 of the DER SubjectPublicKeyInfo. Missing when the relay serves plain HTTP. |
+| `code` | Always | The single-use pairing code. |
+| `expiresAt` | Always | When the code stops working, in epoch milliseconds. |
 
-The passcode flow is the same payload minus the QR: the user reads `code` off the screen and types it, and names `url` themselves.
+The passcode flow uses the same information without the QR code. The user reads `code` off the screen and types it, and enters the relay's address (`url`) themselves.
 
 ## Claiming a code
 
@@ -51,7 +51,7 @@ Content-Type: application/json
 { "code": "48213977", "name": "Pixel 8" }
 ```
 
-On success, HTTP 200:
+On success, the relay answers HTTP 200:
 
 ```json
 {
@@ -62,72 +62,72 @@ On success, HTTP 200:
 }
 ```
 
-On failure, HTTP 403:
+On failure, it answers HTTP 403:
 
 ```json
 { "error": "pairing-failed", "message": "That code is not valid." }
 ```
 
-The code is consumed on success, so a second claim fails. Codes expire, and repeated failures lock the source address out for `lockoutMs`.
+A successful claim uses up the code, so claiming it again fails. Codes also expire, and too many failed attempts lock the source address out for `lockoutMs`.
 
-Store the token the way you would store a password. It does not expire on use and it is the whole credential.
+Store the token the way you'd store a password. Using it doesn't wear it out, and it's the entire credential.
 
 ## Authenticating
 
-Every request:
+Send this header on every request:
 
 ```
 Authorization: Bearer <token>
 ```
 
-Both WebSocket upgrades carry the same header. This matters more than it looks: the client opens `/api/events.mux` and `/api/events.host` concurrently and gives them 3000 ms together before abandoning the connection generation. The relay verifies the token with one in-memory HMAC and adds no I/O to that path, so the budget is unaffected — but an upgrade sent without the header is refused at the handshake, and both downlinks must succeed.
+Send it on both WebSocket upgrades too. This matters more than it looks. The app opens `/api/events.mux` and `/api/events.host` at the same time and gives them 3000 ms together before it gives up on that connection attempt. The relay checks the token with a single in-memory HMAC and does no I/O on that path, so it doesn't eat into the budget. But an upgrade without the header is refused during the handshake, and both downlinks have to succeed.
 
 ## Status codes
 
-The relay deliberately answers **403**, never 401, for every unauthorized case — including an expired or revoked token. DSH Mobile already maps 403 to "the harness is there and refused this address", which is a usable pairing hint, and maps other unexpected codes to "not a harness at all". A 401 would surface as the wrong diagnosis.
+The relay always answers **403** for anything unauthorized, never 401. That includes expired and revoked tokens. DSH Mobile already reads 403 as "the harness is there and refused this address", which is a useful hint to pair again, and reads other unexpected codes as "this isn't a harness". A 401 would lead to the wrong diagnosis.
 
-| Code | Meaning | What the client should do |
+| Code | Meaning | What the app should do |
 |---|---|---|
-| 403 | No credential, expired, revoked, untrusted `Host`, cross-site marker, or a privileged method the credential may not reach | Prompt to pair again. Do not retry with backoff. |
-| 404 | Path not proxied, or the harness does not compose that capability | Existing `capability-unavailable` handling applies. |
-| 429 | Rate limited or locked out; `Retry-After` is set | Back off for the stated interval. |
-| 502 | The harness behind the relay is not answering | Existing reconnect handling applies. |
+| 403 | No credential, expired or revoked credential, untrusted `Host`, cross-site marker, or a privileged method this credential can't reach | Ask the user to pair again. Don't retry with backoff. |
+| 404 | The path isn't proxied, or the harness doesn't include that capability | Use the existing `capability-unavailable` handling. |
+| 429 | Rate limited or locked out. `Retry-After` is set | Wait for the stated interval. |
+| 502 | The harness behind the relay isn't answering | Use the existing reconnect handling. |
 
 ## TLS
 
-When `fingerprint` is present, pin it: compute SHA-256 over the DER SubjectPublicKeyInfo of the leaf certificate and compare against the base64 value from the QR. On Android that is `CertificatePinner` with a `sha256/<value>` pin — the same encoding.
+When the QR code includes `fingerprint`, pin it. Compute SHA-256 over the DER SubjectPublicKeyInfo of the leaf certificate and compare it with the base64 value from the QR code. On Android, that's `CertificatePinner` with a `sha256/<value>` pin, which uses the same encoding.
 
-Pinning the public key rather than the whole certificate means the relay can renew with the same key without breaking paired devices.
+Pinning the public key instead of the whole certificate means the relay can renew its certificate with the same key without breaking paired devices.
 
-When `fingerprint` is absent, the relay is serving plaintext and the credential travels in the clear. A client should say so plainly in its UI.
+When `fingerprint` is missing, the relay is serving plain HTTP and the token travels unencrypted. The app should tell the user that clearly.
 
-Android note: reaching an `https://` origin needs no manifest change, but `network_security_config.xml` currently permits cleartext globally. A client that only ever talks to a pinned relay should narrow that.
+On Android, reaching an `https://` origin needs no manifest change. DSH Mobile's `network_security_config.xml` currently allows cleartext everywhere, though, and an app that only ever talks to a pinned relay should narrow that.
 
 ## Revocation
 
-There is no revocation callback. A revoked token starts failing with 403 on its next request, which the client already handles as "pair again". `Sign out everywhere` on the relay rotates the signing key and invalidates every token at once, with the same effect.
+There's no revocation callback. A revoked token gets a 403 on its next request, which the app already treats as "pair again". "Sign out everywhere" on the relay rotates the signing key, which invalidates every token at once with the same result.
 
 ## Discovery
 
-The relay advertises `_dsh._tcp` over mDNS when `mdns` is enabled. TXT records:
+When `mdns` is on, the relay advertises `_dsh._tcp` over mDNS with these TXT records:
 
 | Key | Value |
 |---|---|
 | `v` | `1` |
 | `relay` | `dsh-relay` |
 | `tls` | `self-signed`, `files`, or `off` |
-| `plain` | port of the compatibility listener, when running |
-| `pin` | base64 SPKI fingerprint, when the listener terminates TLS |
+| `plain` | Port of the compatibility listener, when it's running |
+| `pin` | Base64 SPKI fingerprint, when the listener uses TLS |
 
-The service port is the primary listener's. A client that browses for this can skip the subnet sweep entirely; nothing depends on it, and the sweep keeps working.
+The advertised port is the main listener's. An app that browses for this service can skip scanning the subnet. Nothing depends on it, and scanning keeps working.
 
 ## Checklist
 
 - [ ] `https://` accepted as a base URL, for RPC and both WebSockets
 - [ ] `Authorization: Bearer` on every RPC call and both upgrades
-- [ ] QR scanner that validates `kind` and `v`
+- [ ] QR scanner that checks `kind` and `v`
 - [ ] Passcode entry as the fallback
 - [ ] `POST /relay/pair` claim, with the token stored encrypted
 - [ ] SPKI pinning when `fingerprint` is present
-- [ ] 403 surfaces as "pair again", not as a transport failure
-- [ ] mDNS browse for `_dsh._tcp`, sweep as the fallback
+- [ ] 403 shown as "pair again", not as a connection failure
+- [ ] mDNS browse for `_dsh._tcp`, with a subnet scan as the fallback
