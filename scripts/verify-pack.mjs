@@ -11,7 +11,7 @@
  */
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const root = fileURLToPath(new URL('..', import.meta.url))
@@ -35,7 +35,12 @@ try {
   } else {
     const manifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
     const tarball = join(scratch, `${manifest.name}-${manifest.version}.tgz`)
-    const extracted = spawnSync('tar', ['-xOf', tarball, 'package/lib/index.js'], { encoding: 'buffer' })
+    // Relative to the scratch directory: GNU tar, which Git for Windows puts on
+    // PATH, reads the colon of a drive letter as a remote host.
+    const extracted = spawnSync('tar', ['-xOf', basename(tarball), 'package/lib/index.js'], {
+      cwd: scratch,
+      encoding: 'buffer',
+    })
     if (extracted.status !== 0) {
       process.stderr.write(String(extracted.stderr ?? 'tar could not read the tarball'))
       process.exitCode = 1

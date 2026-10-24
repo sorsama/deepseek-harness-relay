@@ -1,6 +1,6 @@
 {
   "name": "dsh-relay",
-  "version": "0.3.1",
+  "version": "0.3.0",
   "description": "Authenticated remote access for a DeepSeek Harness web profile: TLS, QR/passcode device pairing, password sign-in, and per-device revocation in front of an untouched loopback harness.",
   "keywords": [
     "dsh-plugin",
@@ -51,7 +51,6 @@
     "client": {
       "platform": "web",
       "inject": [
-        "@deepseek-ai/dsh-client-locale",
         "@deepseek-ai/dsh-client-ui-plugin-manager",
         "@deepseek-ai/dsh-client-ui-settings"
       ]
@@ -68,7 +67,8 @@
     "lint": "oxlint src tests"
   },
   "engines": {
-    "node": "^22.19.0 || >=24"
+    "node": "^22.19.0 || >=24",
+    "dsh": ">=0.1.7-rc.2 <0.3.0-0"
   },
   "packageManager": "pnpm@10.6.5",
   "dependencies": {
@@ -79,22 +79,18 @@
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": ">=4.0.4",
-    "@deepseek-ai/dsh-host-webserver": "^0.1.7-rc.2 || >=0.2.0-rc.1 <0.2.2-0",
-    "@deepseek-ai/dsh-client-ui-plugin-manager": "^0.1.7-rc.2 || >=0.2.0-rc.1 <0.2.2-0",
-    "@deepseek-ai/dsh-client-locale": "^0.1.7-rc.2 || >=0.2.0-rc.1 <0.2.2-0",
-    "@deepseek-ai/dsh-client-ui-settings": "^0.1.7-rc.2 || >=0.2.0-rc.1 <0.2.2-0"
+    "@deepseek-ai/dsh-host-webserver": ">=0.1.7-rc.2 <0.3.0-0",
+    "@deepseek-ai/dsh-client-ui-plugin-manager": ">=0.1.7-rc.2 <0.3.0-0",
+    "@deepseek-ai/dsh-client-ui-settings": ">=0.1.7-rc.2 <0.3.0-0"
   },
   "peerDependenciesMeta": {
-    "@deepseek-ai/dsh-host-webserver": {
-      "optional": true
-    },
     "@deepseek-ai/cordis": {
       "optional": true
     },
-    "@deepseek-ai/dsh-client-ui-plugin-manager": {
+    "@deepseek-ai/dsh-host-webserver": {
       "optional": true
     },
-    "@deepseek-ai/dsh-client-locale": {
+    "@deepseek-ai/dsh-client-ui-plugin-manager": {
       "optional": true
     },
     "@deepseek-ai/dsh-client-ui-settings": {
@@ -103,7 +99,6 @@
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "4.0.5",
-    "@deepseek-ai/dsh-client-locale": "0.2.1-rc.2",
     "@deepseek-ai/dsh-client-ui-plugin-manager": "0.2.1-rc.2",
     "@deepseek-ai/dsh-client-ui-primitives": "0.2.1-rc.2",
     "@deepseek-ai/dsh-client-ui-settings": "0.2.1-rc.2",
