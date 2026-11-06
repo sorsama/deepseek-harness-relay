@@ -30,14 +30,16 @@ import { assertCoherent, Config, plainConfig, type ConfigSchema } from './config
 import { injectRelayLink } from './badge.ts'
 import { assertTrustedAuthority, isLoopbackAddress, localAddresses, relayAuthorities } from './fence.ts'
 import { HarnessSessionResolver } from './harness-session.ts'
+import { harnessOriginAction } from './harness-origin.ts'
 import { advertise } from './mdns.ts'
+import { pairingOrigins, systemInterfaces } from './origins.ts'
 import { relayStateDir } from './paths.ts'
 import { followSettings } from './settings-section.ts'
-import { RELAY_PREFIX } from './routes.ts'
 import { injectSecureContextShim } from './secure-context.ts'
 import { startListener, type RelayRuntime } from './server.ts'
 import { RelayStore } from './state.ts'
 import { certificateSans, loadCertificate } from './tls.ts'
+import { handleRelayRoute, RELAY_PREFIX } from './routes.ts'
 
 export { Config, plainConfig } from './config.ts'
 export type { CompatConfig, ConfigSchema, PrivilegedPolicy, TlsMode } from './config.ts'
@@ -313,25 +315,73 @@ async function start(
   if (compat !== undefined) runtime.plainPort = compat.port
 
   const scheme = material === undefined ? 'http' : 'https'
+  // The relay's own origin is whatever the operator asked for. When that is
+  // loopback, a QR built from it names an address no phone can reach, so the
+  // candidate list is computed here and used by the pairing page.
+  runtime.pairingOrigins = pairingOrigins(systemInterfaces(), scheme, primary.port)
 
-  // Two registrations on the harness's own web server, both needing the port
-  // the relay actually bound (`port: 0` asks the operating system to choose).
+  // The relay's pages are ALSO served on the harness's own web server.
   //
-  // The redirect is what makes `/relay/...` work on the harness's own loopback
-  // port at all. Nothing else claims that prefix there, so without it the
-  // single-page application's catch-all answers and routes the person back to
-  // the chat — a dead end for a typed URL and for the link below alike. A
-  // request arriving through the relay never reaches this route, because the
-  // relay serves `/relay` itself and forwards only what it does not own.
+  // That is what lets the desktop app change page in place: its window is a
+  // `dsh-app:` page proxied to this server, so a relative navigation to
+  // `/relay/devices` arrives here and renders as an ordinary same-origin
+  // document — no certificate the shell cannot trust, and no fatal navigation.
+  // The same route serves a browser sitting at the machine.
+  //
+  // One caller still gets a redirect: DSH Mobile resolves where a relay is by
+  // asking `/relay/health` and reading the 3xx. Only that probe redirects, and
+  // a document navigation never does — an earlier version redirected every
+  // `/relay` path, which handed the desktop window a self-signed certificate
+  // it could not load and bricked the app. See `harness-origin.ts`.
   const unroute = ctx.webServer.register({
     kind: 'prefix',
     path: RELAY_PREFIX,
     handler: (req, res) => {
-      const host = typeof req.headers.host === 'string' ? req.headers.host : '127.0.0.1'
-      const hostname = host.replace(/:\d+$/, '')
-      const target = `${scheme}://${hostname}:${String(primary.port)}${req.url ?? RELAY_PREFIX}`
-      res.writeHead(302, { location: target, 'cache-control': 'no-store' })
-      res.end()
+      const address = req.socket.remoteAddress ?? ''
+      const action = harnessOriginAction(req, isLoopbackAddress(address))
+      if (action === 'refuse') {
+        res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' })
+        res.end('not found')
+        return
+      }
+      const path = req.url ?? RELAY_PREFIX
+      if (action === 'redirect') {
+        const host = typeof req.headers.host === 'string' ? req.headers.host : '127.0.0.1'
+        const hostname = host.replace(/:\d+$/, '').replace(/^\[/, '').replace(/\]$/, '')
+        res.writeHead(302, {
+          location: `${scheme}://${hostname}:${String(primary.port)}${path}`,
+          'cache-control': 'no-store',
+        })
+        res.end()
+        return
+      }
+      let url: URL
+      try {
+        url = new URL(path, 'http://harness.invalid')
+      } catch {
+        res.writeHead(400, { 'content-type': 'text/plain; charset=utf-8' })
+        res.end('bad request')
+        return
+      }
+      void handleRelayRoute(req, res, url, {
+        auth,
+        config,
+        // The harness binds loopback, and the trust check above refused
+        // anything that did not arrive as this machine's own client.
+        identity: { credential: 'loopback', privileged: true },
+        address,
+        origin: `http://127.0.0.1:${String(upstreamPort)}`,
+        pairingOrigins: runtime.pairingOrigins ?? [],
+        fingerprint: material?.record.fingerprint,
+        secure: false,
+        now: Date.now(),
+      }).catch((error: unknown) => {
+        log.warn(`failed to answer ${path} on the harness origin: ${String(error)}`)
+        if (!res.headersSent) {
+          res.writeHead(500, { 'content-type': 'text/plain; charset=utf-8' })
+          res.end('relay error')
+        }
+      })
     },
   })
   const untap = config.uiLink ? ctx.webServer.tapIndex(injectRelayLink) : () => undefined
@@ -374,9 +424,9 @@ async function start(
     // async disposers concurrently with no completion ordering, so anything
     // order-dependent belongs inside a single one.
     stop: async () => {
+      unroute()
       untapShim()
       untap()
-      unroute()
       await unadvertise()
       await compat?.close()
       await primary.close()

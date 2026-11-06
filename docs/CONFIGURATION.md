@@ -27,7 +27,7 @@ Everything you need from a phone lives on the relay's own pages instead. They wo
 | `/relay/password` | Setting or changing the password |
 | `/relay/health` | A health check that needs no sign-in |
 
-The **Relay** link in the bottom-right corner of the harness UI opens these pages. Set `uiLink: false` to hide it.
+The **Relay** action at the sidebar foot, beside the account menu, changes the window to these pages — in place, with a link back to the harness. So does the **Relay** link in the bottom-right corner of the harness UI: the relay also serves its pages on the harness's own origin, so both paths work there instead of dead-ending in the chat. Set `uiLink: false` to hide the corner link.
 
 ## Environment variables
 

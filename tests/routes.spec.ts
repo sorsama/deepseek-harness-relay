@@ -25,6 +25,7 @@ let upstream: Server
 let relay: RelayListener
 let store: RelayStore
 let auth: Authenticator
+let runtime: RelayRuntime
 let dir: string
 let base: string
 
@@ -70,12 +71,13 @@ beforeEach(async () => {
 
   const config = plainConfig(Config({ stateDir: dir, port: 0, tls: 'off', mdns: false }) as Parameters<typeof plainConfig>[0])
   auth = new Authenticator(store, config)
-  const runtime: RelayRuntime = {
+  const runtimeOne = {
     auth,
     config,
     target: { host: '127.0.0.1', port: upstreamPort, timeoutMs: 5000 },
     log: () => undefined,
   }
+  runtime = runtimeOne
   relay = await startListener({ runtime, bind: '127.0.0.1', port: 0, authorities: ['127.0.0.1', 'localhost'] })
   base = `http://127.0.0.1:${String(relay.port)}`
 })
@@ -394,5 +396,39 @@ describe('a locked-out caller is told to wait, not that the code was wrong', () 
     // The rate limiter set this header and the lockout did not, which are indistinguishable from
     // outside — so a client that trusted the documented header busy-retried against a lockout.
     expect(Number(response.headers.get('retry-after'))).toBeGreaterThan(0)
+  })
+})
+
+describe('the pairing QR names an address a phone can reach', () => {
+  it('falls back to loopback with a warning when the machine has no network address', async () => {
+    const answer = await get('/relay/pair')
+    expect(answer.status).toBe(200)
+    // This listener is plaintext, so the fallback origin is its own http one.
+    expect(answer.body).toContain(`${base}/relay/pair`)
+    expect(answer.body).toContain('No network address was found')
+  })
+
+  it('uses the first network origin instead of loopback', async () => {
+    runtime.pairingOrigins = ['https://192.168.1.122:3443', 'https://10.0.0.4:3443']
+    const answer = await get('/relay/pair')
+    expect(answer.status).toBe(200)
+    // The instructions and the QR both name the reachable origin, not 127.0.0.1.
+    expect(answer.body).toContain('https://192.168.1.122:3443/relay/pair')
+    expect(answer.body).not.toContain('https://127.0.0.1:')
+    expect(answer.body).toContain('Address your device can reach')
+  })
+
+  it('lets the operator pick another interface', async () => {
+    runtime.pairingOrigins = ['https://192.168.1.122:3443', 'https://10.0.0.4:3443']
+    const answer = await get(`/relay/pair?origin=${encodeURIComponent('https://10.0.0.4:3443')}`)
+    expect(answer.status).toBe(200)
+    expect(answer.body).toContain('https://10.0.0.4:3443/relay/pair')
+  })
+
+  it('ignores an origin that is not one of this machine\'s addresses', async () => {
+    runtime.pairingOrigins = ['https://192.168.1.122:3443']
+    const answer = await get(`/relay/pair?origin=${encodeURIComponent('https://attacker.example:3443')}`)
+    expect(answer.status).toBe(200)
+    expect(answer.body).not.toContain('attacker.example')
   })
 })

@@ -91,8 +91,17 @@ export interface PairingPayload {
   readonly v: 1
   /** Discriminator, so a scanner can tell this QR from any other. */
   readonly kind: 'dsh-relay-pair'
-  /** Primary origin, including scheme and port. */
+  /** Primary origin, including scheme and port. Always the one to try first. */
   readonly url: string
+  /**
+   * Other origins that serve this same relay, most likely first.
+   *
+   * Present when the machine has more than one network address. A client that
+   * knows this field may fail over to the next origin when `url` does not
+   * answer; one that does not can ignore it, which is why it is additive and
+   * `v` stays 1.
+   */
+  readonly urls?: readonly string[]
   /** Plain-HTTP origin for clients that cannot speak TLS; absent when none is listening. */
   readonly plainUrl?: string
   /** SHA-256 of the DER SubjectPublicKeyInfo, base64; absent when the relay serves plaintext. */
@@ -110,14 +119,19 @@ export interface PairingPayload {
  */
 export function pairingPayload(parts: {
   readonly url: string
+  readonly urls?: readonly string[] | undefined
   readonly plainUrl?: string | undefined
   readonly fingerprint?: string | undefined
   readonly code: PairingCode
 }): PairingPayload {
+  // The chosen origin is always first even if the caller handed it later:
+  // every client reads `url`, so that field must be the best guess.
+  const urls = parts.urls === undefined ? undefined : [...new Set([parts.url, ...parts.urls])]
   return {
     v: 1,
     kind: 'dsh-relay-pair',
     url: parts.url,
+    ...urls !== undefined && urls.length > 1 && { urls },
     ...parts.plainUrl !== undefined && { plainUrl: parts.plainUrl },
     ...parts.fingerprint !== undefined && { fingerprint: parts.fingerprint },
     code: parts.code.code,

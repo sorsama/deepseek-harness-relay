@@ -23,6 +23,7 @@ The QR code holds a single UTF-8 JSON object. Check `kind` before doing anything
   "v": 1,
   "kind": "dsh-relay-pair",
   "url": "https://192.168.1.5:3443",
+  "urls": ["https://192.168.1.5:3443", "https://10.0.0.4:3443"],
   "plainUrl": "http://192.168.1.5:3444",
   "fingerprint": "3q2+7wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
   "code": "48213977",
@@ -34,7 +35,8 @@ The QR code holds a single UTF-8 JSON object. Check `kind` before doing anything
 |---|---|---|
 | `v` | Always `1` | Payload version. Refuse anything higher. |
 | `kind` | Always | Must equal `dsh-relay-pair`. |
-| `url` | Always | Origin of the main listener, including the scheme. |
+| `url` | Always | Origin of the main listener, including the scheme. Always the one to try first, and always reachable from the network the operator chose — never loopback. |
+| `urls` | Sometimes | Every origin that serves this same relay, `url` first. A client may fail over to the next entry when `url` does not answer; a client that ignores it still works. Added in 0.3.3; `v` stays `1`. |
 | `plainUrl` | Sometimes | Origin of the plain HTTP compatibility listener, if one is running. An app that follows this document should ignore it and use `url`. |
 | `fingerprint` | Sometimes | Base64 SHA-256 of the DER SubjectPublicKeyInfo. Missing when the relay serves plain HTTP. |
 | `code` | Always | The single-use pairing code. |

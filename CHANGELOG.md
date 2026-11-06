@@ -1,5 +1,63 @@
 # Changelog
 
+## 0.3.3 — 2026-11-06
+
+### Fixed
+
+- **The pairing QR now names an address a phone can reach.** The pairing page
+  is normally opened on the machine itself, so its origin is loopback, and the
+  QR encoded `https://127.0.0.1:3443` — a scan that succeeds and then cannot
+  connect. The page now lists the machine's network origins and picks the most
+  likely one (real adapter over virtual adapter, never loopback); the pairing
+  page's picker switches the QR to another interface. If the machine has no
+  network address at all the page says so instead of pretending.
+
+### Added
+
+- **The relay's pages are served on the harness's own origin**, so the sidebar
+  **Relay** action changes the page in place — inside the desktop app, in the
+  same window — instead of opening a browser. The mobile discovery probe
+  (`GET /relay/health` with a non-document `Accept`) still receives the 3xx it
+  reads to find a relay; a document navigation never does.
+
+### Changed
+
+- The QR carries an optional `urls` list (the same relay at every reachable
+  origin, `url` first) so a client may fail over. `v` stays `1`; clients that
+  ignore the field are unaffected.
+
+## 0.3.2 — 2026-11-06
+
+### Added
+
+- **A Relay action at the sidebar foot**, rendered just above the account
+  launcher, so pairing, devices, and the password page are one click away
+  instead of a URL you have to know. It opens the relay's pages in the system
+  browser — never in the harness window, where the relay's self-signed
+  certificate is a fatal navigation in the desktop app. A phone already viewing
+  the harness through the relay gets a relative link into the same pages.
+- The account popover (**Settings / Feedback / Sign out**) has no seat in
+  harness 0.2.1 — its rows are a hardcoded list in
+  `@deepseek-ai/dsh-client-ui-settings-account` — so the plugin takes the
+  supported `sidebar.footer.action` seat beside it rather than reimplementing
+  the account menu.
+
+## 0.3.1 — 2026-11-06
+
+### Fixed
+
+- **The desktop app no longer fails to start after the relay is installed.**
+  The plugin registered a redirect from the harness's own origin (`/relay/...`)
+  to the relay's TLS listener. The desktop app's window is an Electron page,
+  and a 302 onto the relay's self-signed certificate cannot be loaded
+  (`ERR_CERT_AUTHORITY_INVALID`); Electron treats a failed main-frame
+  navigation as fatal, so the app showed "The application could not start or
+  stopped unexpectedly" and every restart landed on the same failed URL. The
+  redirect is removed: `/relay/...` on the harness's own port now falls through
+  to the harness, and the relay's pages are reached on the relay's own origin.
+  The corner link still works there; on the harness port it is inert rather
+  than fatal.
+
 ## 0.3.0 — 2026-10-24
 
 Harness **0.1.7 through 0.2.x** support. On any of them the published 0.2.1

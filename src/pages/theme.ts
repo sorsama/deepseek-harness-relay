@@ -244,6 +244,25 @@ button:focus-visible, .btn:focus-visible {
 .actions.stack { flex-direction: column; }
 .actions.stack > .btn, .actions.stack > button, .actions.stack form > button { flex: none; }
 
+/* The pairing page's address picker. It is one decision rather than a form to
+   fill in, so it stays a row; the label takes the full width above it. */
+form.origins { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 8px; }
+form.origins label { flex: 1 1 100%; }
+form.origins select {
+  flex: 1 1 200px;
+  height: 36px;
+  box-sizing: border-box;
+  padding: 0 12px;
+  border-radius: 12px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  background: var(--dsw-specific-login-input);
+  color: var(--dsw-alias-label-primary);
+  font-size: 14px;
+  line-height: 22px;
+  font-family: var(--ds-font-family-code);
+}
+form.origins button { flex: none; }
+
 /* A link inside running prose keeps the accent treatment. A link wearing .btn
    is a control, and a control never underlines. */
 a { color: var(--dsw-alias-state-business-primary); text-decoration: none; }

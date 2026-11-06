@@ -52,6 +52,15 @@ export interface RelayRuntime {
    * which is reachable from that client by construction.
    */
   plainPort?: number | undefined
+  /**
+   * Network origins a phone could reach this relay at, best guess first.
+   *
+   * The listener's own origin is whatever the client asked for; a client
+   * sitting at the machine itself asks for loopback, which no phone can reach.
+   * These are the alternatives the pairing page offers and the QR carries.
+   * Assigned once the primary listener has a concrete port.
+   */
+  pairingOrigins?: string[]
   /** Report a refusal; the plugin routes this to the Cordis logger. */
   readonly log: (message: string) => void
 }
@@ -211,6 +220,7 @@ async function serve(
       identity,
       address,
       origin: originOf(req, policy.secure),
+      pairingOrigins: runtime.pairingOrigins ?? [],
       plainOrigin: plainOriginOf(req, runtime.plainPort),
       fingerprint: runtime.fingerprint,
       secure: policy.secure,

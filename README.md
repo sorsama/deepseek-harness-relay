@@ -39,7 +39,8 @@ Harness 0.1.2 and later have a sign-in of their own (a browser session cookie). 
 - A "sign out everywhere" button that rotates the signing key and logs out every browser and device at once.
 - HTTPS, with your own certificate or a self-signed one whose key apps can pin.
 - mDNS advertisement on `_dsh._tcp`, so apps can find the relay without scanning your subnet.
-- The full harness web UI, unchanged, with a small **Relay** link in the corner.
+- The full harness web UI, unchanged, with a small **Relay** link in the corner when the page is served through the relay.
+- A **Relay** action at the sidebar foot, one click from the account menu, that changes the app to the relay's pairing, device, and password pages — in place, in the same window.
 - A settings page at **Plugins → dsh-relay → Configure** on the machine running the harness. Changes apply when you press Save, with no restart.
 
 ## Supported harness versions
@@ -51,6 +52,16 @@ Harness 0.1.2 and later have a sign-in of their own (a browser session cookie). 
 | 0.1.1 and earlier | 0.1 |
 
 If you install a version that doesn't match your harness, the harness refuses to load it and tells you which range it needs. 0.3 depends on the settings system added in harness 0.1.7, and 0.2 hangs the web app on 0.1.7 and later, so the two can't overlap.
+
+### The desktop app
+
+The DeepSeek Harness desktop app runs the same web-app profile, so the relay works there too — it fronts the app's internal loopback server, and you don't need to run `dsh web` beside it. Install into the app's profile instead of `web`:
+
+```sh
+dsh plugin --profile desktop add dsh-relay
+```
+
+Restart the app to load it. `https://127.0.0.1:3443/relay/health` answers once the relay is up. Do not add a redirect from the harness's own port to the relay's origin: the app's window cannot complete a navigation to the relay's self-signed certificate, and that failure is fatal to the app.
 
 ## Quick start
 
@@ -69,7 +80,9 @@ New to this? [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md) walks through ev
 
 3. **Set a password.** On the machine running the harness, open `https://127.0.0.1:3443/relay/password`. Until a password exists, this page only works from that machine, so nobody on your network can claim the relay first.
 
-4. **Pair your phone.** Still on that machine, open `https://127.0.0.1:3443/relay/pair`. Scan the QR code with your phone, or open the same path on the phone and type the code. Give the device a name, and it shows up under `/relay/devices`.
+4. **Pair your phone.** Still on that machine, open `https://127.0.0.1:3443/relay/pair` — or press **Relay** at the sidebar foot. Scan the QR code with your phone, or open the same path on the phone and type the code. Give the device a name, and it shows up under `/relay/devices`.
+
+   The QR names an address your phone can reach, not loopback. A machine with a virtual-machine adapter, a VPN, or two network cards has several addresses, and the page lists them: pick the one your phone is on, then scan. Until you do, the QR uses the best guess.
 
 No `dsh` on your PATH? Every command works as `npx @deepseek-ai/dsh ...` instead.
 

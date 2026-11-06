@@ -22,6 +22,7 @@ import { SESSION_COOKIE } from './auth/index.ts'
 import { pairingPayload } from './auth/pairing.ts'
 import type { Config } from './config.ts'
 import { claimPage, devicesPage, loginPage, messagePage, pairPage, pairedPage, passwordPage } from './pages/views.ts'
+import { isLoopbackOrigin, pairingOriginOptions } from './origins.ts'
 import { parseFields, readBody, safeNextPath, sendHtml, sendJson, sendRedirect, sessionCookie, wantsJson } from './wire.ts'
 
 /** Prefix owning every route in this module. */
@@ -35,6 +36,14 @@ export interface RouteContext {
   readonly address: string
   /** Origin the client reached this relay on, for links and the QR payload. */
   readonly origin: string
+  /**
+   * Network origins a phone could reach this relay at, best guess first.
+   *
+   * The page is usually opened on the machine itself, whose own origin is
+   * loopback — an address no phone can reach. These are the alternatives the
+   * QR and the address picker use; empty when the machine has no other address.
+   */
+  readonly pairingOrigins: readonly string[]
   /** Plain-HTTP origin, when the compatibility listener is running. */
   readonly plainOrigin?: string | undefined
   /** SPKI pin of the served certificate; absent on a plaintext listener. */
@@ -72,11 +81,20 @@ function refuse(req: IncomingMessage, res: ServerResponse, message: string): voi
  * Render the QR carrying an invitation.
  * @param context - the relay's origins and certificate identity.
  * @param code - the live invitation.
+ * @param selected - the origin the QR should name: one a phone can reach.
+ * @param options - every reachable origin, selected first, for clients that
+ * support failover.
  * @returns the QR as inline SVG.
  */
-async function renderQr(context: RouteContext, code: { code: string, expiresAt: number }): Promise<string> {
+async function renderQr(
+  context: RouteContext,
+  code: { code: string, expiresAt: number },
+  selected: string,
+  options: readonly string[],
+): Promise<string> {
   const payload = pairingPayload({
-    url: context.origin,
+    url: selected,
+    urls: options.length > 1 ? options : undefined,
     plainUrl: context.plainOrigin,
     fingerprint: context.fingerprint,
     code,
@@ -232,11 +250,19 @@ export async function handleRelayRoute(
     // claim one. The same path serves both so a QR and a typed URL agree.
     if (isOperator(identity)) {
       const code = auth.pairing.peek(now) ?? auth.pairing.issue(config.pairingCodeLength, config.pairingWindowMs, now)
+      // The page was most likely opened on this machine, whose own origin is
+      // loopback. A QR naming that address scans fine and then cannot connect,
+      // so the operator picks (or the heuristic guesses) a network origin.
+      const options = pairingOriginOptions(context.origin, context.pairingOrigins)
+      const requested = url.searchParams.get('origin')
+      const selected = requested !== null && options.includes(requested) ? requested : options[0] ?? context.origin
       sendHtml(res, 200, pairPage({
-        qrSvg: await renderQr(context, code),
+        qrSvg: await renderQr(context, code, selected, options),
         code: code.code,
         expiresInSeconds: Math.max(0, Math.round((code.expiresAt - now) / 1000)),
-        url: context.origin,
+        url: selected,
+        origins: options.length > 1 ? options : undefined,
+        loopbackOnly: isLoopbackOrigin(selected),
         plainUrl: context.plainOrigin,
         fingerprint: context.fingerprint,
       }))

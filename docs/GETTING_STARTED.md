@@ -161,7 +161,7 @@ Updating to 0.8.0 is the better fix.
 
 ## What's next
 
-- **Relay settings** are at **Plugins → dsh-relay → Configure** on the harness machine. Pairing, devices, and the password live on the relay's own pages, which a small **Relay** link in the corner of the harness UI opens. See [Configuration](CONFIGURATION.md) for the full list of options.
+- **Relay settings** are at **Plugins → dsh-relay → Configure** on the harness machine. Pairing, devices, and the password live on the relay's own pages, which a small **Relay** link in the corner of the harness UI opens when you are viewing it through the relay. See [Configuration](CONFIGURATION.md) for the full list of options.
 - **The certificate warning** goes away once you give the relay a certificate your browser trusts. See [Certificates](CONFIGURATION.md#certificates).
 - **Reaching the relay from outside your home network** takes a few extra precautions. See [Reaching the relay from the internet](CONFIGURATION.md#reaching-the-relay-from-the-internet).
 - **Something not working?** See [Troubleshooting](TROUBLESHOOTING.md).

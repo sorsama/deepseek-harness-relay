@@ -86,7 +86,10 @@ function formScope() {
 function mount() {
   const { scope, writes } = formScope()
   const served: string[][] = []
-  const registered: { spec: { name: string, key: string, inject?: () => object }, component: unknown }[] = []
+  const registered: {
+    spec: { name: string, key?: string, id?: string, order?: number, inject?: () => object }
+    component: unknown
+  }[] = []
   const ctx = {
     configForms: {
       get: (id: string) => {
@@ -100,7 +103,10 @@ function mount() {
     },
     slots: {
       inject: (_name: string, register: () => () => void) => register(),
-      register: (spec: { name: string, key: string, inject?: () => object }, component: unknown) => {
+      register: (
+        spec: { name: string, key?: string, id?: string, order?: number, inject?: () => object },
+        component: unknown,
+      ) => {
         registered.push({ spec, component })
         return () => undefined
       },
@@ -109,6 +115,13 @@ function mount() {
   }
   apply(ctx as unknown as Parameters<typeof apply>[0])
   return { served, registered, writes }
+}
+
+/** The Plugins row's configuration page, or a failure naming what was registered instead. */
+function cardOf(registered: { spec: { name: string } }[]) {
+  const card = registered.find(entry => entry.spec.name === 'plugins.row.config')
+  expect(card, `cards registered: ${registered.map(entry => entry.spec.name).join(', ')}`).toBeDefined()
+  return card as { spec: { name: string, key?: string, inject?: () => object } }
 }
 
 interface Face {
@@ -125,14 +138,23 @@ describe('the browser half', () => {
   it('registers the relay row\'s configuration page while the Host serves the namespace', () => {
     const { served, registered } = mount()
     expect(served).toEqual([['relay']])
-    expect(registered).toHaveLength(1)
-    expect(registered[0]?.spec.name).toBe('plugins.row.config')
-    expect(registered[0]?.spec.key).toBe('dsh-relay#relay')
+    expect(cardOf(registered).spec.key).toBe('dsh-relay#relay')
+  })
+
+  it('registers a Relay action at the sidebar foot, one click from the account menu', () => {
+    const { registered } = mount()
+    const action = registered.find(entry => entry.spec.name === 'sidebar.footer.action')
+    expect(action).toBeDefined()
+    // The account popover itself has no seat, so this is the supported neighbour.
+    expect(action?.spec.id).toBe('relay')
+    expect(action?.spec.order).toBe(100)
+    const face = action?.spec.inject?.() as { open?: unknown }
+    expect(typeof face.open).toBe('function')
   })
 
   it('stages every switch the page renders, and saves it as the schema\'s own type', async () => {
     const { registered, writes } = mount()
-    const face = registered[0]?.spec.inject?.() as Face
+    const face = cardOf(registered).spec.inject?.() as Face
     const store = face.hooks.relayCard
     // Each of these used to throw "plugin card has no field" on the next
     // projection, because the switches had no spec.
@@ -157,7 +179,7 @@ describe('the browser half', () => {
 
   it('writes nothing for a switch set back to the value already stored', async () => {
     const { registered, writes } = mount()
-    const face = registered[0]?.spec.inject?.() as Face
+    const face = cardOf(registered).spec.inject?.() as Face
     face.edit('uiLink', 'true')
     expect(face.hooks.relayCard.getSnapshot().dirty).toBe(false)
     face.save()

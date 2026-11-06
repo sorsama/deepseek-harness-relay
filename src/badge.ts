@@ -10,12 +10,14 @@
  * system uses to inject its boot manifest.
  *
  * The href stays relative, which reads correctly through the relay and works
- * with no script at all. It also works on the harness's own loopback port,
- * where a relative `/relay/...` would otherwise hit the single-page
- * application's catch-all and land the person back in the chat — the dead end
- * this link exists to remove. What saves it there is a redirect the plugin
- * registers on the harness's own web server; see `redirectRoute` in
- * `src/index.ts`.
+ * with no script at all. Served from the relay's own origin, `/relay/...` is
+ * answered by the relay itself. Served from the harness's own loopback port it
+ * falls through to the harness, which does not claim that prefix — the link is
+ * then inert, and deliberately so: redirecting it to the relay's TLS origin
+ * would send an embedding shell (the desktop app's Electron window) to a
+ * self-signed certificate it cannot load, and a failed main-frame navigation
+ * there is fatal. A dead link is the right failure; a broken application is
+ * not. See the note in `src/index.ts` where the redirect used to live.
  * @module dsh-relay/badge
  */
 

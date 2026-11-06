@@ -93,9 +93,13 @@ Give it a moment. On shutdown, the relay force-closes WebSocket connections that
 
 That's expected on the machine running the harness. The relay treats loopback as you. Set a password at `/relay/password`, then try from another device to see the sign-in page.
 
-### `/relay/devices` sends me back to the chat
+### The QR scans, but the phone cannot connect
 
-You're on the harness's own port (3080) instead of the relay's (3443). The harness shows its chat app for any path it doesn't recognise. The relay adds a redirect for `/relay/...` on the harness port, which starts working after a restart. Until then, use port 3443.
+The QR encodes a network address, and the phone cannot use one it is not on. On the pairing page, pick the address under **Address your device can reach** and scan the new code. If the page says no network address was found, this machine is on no network the phone shares — open the relay's address on the phone directly and type the code instead.
+
+### `/relay/pair` on the harness port shows the pairing page
+
+That is expected: the relay serves its own pages on the harness's own origin, too, which is how the **Relay** action changes the page in place. The relay's listener still serves them separately on port 3443.
 
 ### I can't find the relay's settings
 

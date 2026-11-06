@@ -131,6 +131,10 @@ export function pairPage(options: {
   readonly code: string
   readonly expiresInSeconds: number
   readonly url: string
+  /** Every network origin a phone could use, default first; absent when there is only one. */
+  readonly origins?: readonly string[] | undefined
+  /** Whether the QR had to fall back to loopback because no network address was found. */
+  readonly loopbackOnly?: boolean | undefined
   readonly plainUrl?: string | undefined
   readonly fingerprint?: string | undefined
 }): string {
@@ -141,14 +145,33 @@ export function pairPage(options: {
   const pin = options.fingerprint === undefined
     ? `<div class="notice warn">This relay is serving plaintext. Anything on the network path can read the traffic.</div>`
     : `<p class="caption fingerprint">Certificate pin (SHA-256/SPKI)<br><span class="mono">${escapeHtml(options.fingerprint)}</span></p>`
+  // The machine usually has more than one network address, and only the
+  // operator knows which network the phone is on. Without this the QR names
+  // whichever one the heuristic guessed first.
+  const picker = options.origins === undefined
+    ? ''
+    : `<form method="get" action="/relay/pair" class="origins">
+    <label for="origin">Address your device can reach</label>
+    <select id="origin" name="origin">
+      ${options.origins.map(origin => `<option value="${escapeHtml(origin)}"${origin === options.url ? ' selected' : ''}>${escapeHtml(origin)}</option>`).join('\n      ')}
+    </select>
+    <button class="outline" type="submit">Show this address</button>
+  </form>`
+  const noNetwork = options.loopbackOnly !== true
+    ? ''
+    : `<div class="notice warn">No network address was found, so this QR points at loopback and no other
+       device can reach it. Connect this machine to the network your device is on, then reload this page — or
+       open the relay's address on the device and type the code by hand.</div>`
 
   return page({
     wide: true,
     title: 'Pair a device',
     body: `
   <h1>Pair a device</h1>
-  <p>Scan this on the device, or open <span class="mono">${escapeHtml(options.url)}/relay/pair</span> there and type the code.</p>
+  <p>Scan this with the DSH Mobile app, or open <span class="mono">${escapeHtml(options.url)}/relay/pair</span> on the device and type the code.</p>
   <div class="qr">${options.qrSvg}</div>
+  ${picker}
+  ${noNetwork}
   <div class="code">${escapeHtml(options.code)}</div>
   <p class="caption">Expires in ${String(options.expiresInSeconds)} seconds, and works once.</p>
   ${plain}

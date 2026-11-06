@@ -1,0 +1,50 @@
+/* The sidebar footer action owns its button geometry: the sidebar's
+   `sidebar.footer.action` seat only stacks occupants above Settings and hands
+   each one the column width (`SidebarRoot.module.css`, `.footerActions`). This
+   mirrors the neighbouring foot rows: a 28px hit area, token colour only, and
+   a hover fill from the same semantic aliases the rest of the shell uses. */
+
+.action {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 28px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary, #61666b);
+  font: inherit;
+  font-size: 12px;
+  line-height: 18px;
+  cursor: pointer;
+  transition: background 0.16s, color 0.16s;
+}
+
+.action:hover,
+.action:focus-visible {
+  color: var(--dsw-alias-label-primary, #0f1115);
+  background: var(--dsw-alias-interactive-bg-hover, rgba(38, 49, 72, 0.06));
+}
+
+.action:focus-visible {
+  outline: 2px solid var(--dsw-alias-border-focus, #4d6bfe);
+  outline-offset: 1px;
+}
+
+.rail {
+  justify-content: center;
+  padding: 0;
+  width: 28px;
+}
+
+.label {
+  white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .action {
+    transition: none;
+  }
+}

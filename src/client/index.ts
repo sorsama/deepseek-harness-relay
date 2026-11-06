@@ -40,6 +40,7 @@
 
 import { SettingsFormModel, type SettingsFormScope } from '@deepseek-ai/dsh-client-ui-primitives'
 import { RelayCard, type RelayCardState, type RelayValue } from './RelayCard.tsx'
+import { RelayFooterAction } from './RelayFooterAction.tsx'
 
 /** Package name; the Plugins page lists this bundle under it. */
 const PACKAGE_NAME = 'dsh-relay'
@@ -49,6 +50,26 @@ const RELAY_NAMESPACE = 'relay'
 
 /** Slot the Plugins page dispatches for one row's configuration page. */
 const CARD_SLOT = 'plugins.row.config'
+
+/**
+ * Slot at the sidebar foot, rendered directly above the account launcher.
+ *
+ * The account popover itself has no seat in harness 0.2.1 — its rows are a
+ * hardcoded list in `@deepseek-ai/dsh-client-ui-settings-account` — so this is
+ * the supported place to put the relay one click from that menu. See
+ * `RelayFooterAction.tsx`.
+ */
+const FOOTER_SLOT = 'sidebar.footer.action'
+
+/**
+ * The relay page the sidebar action opens, relative to whatever served it.
+ *
+ * The host half serves `/relay` on the harness's own web server as well as on
+ * its listener, so a relative navigation works from every page that loads this
+ * bundle: the desktop window (a `dsh-app:` page proxied to the harness), a
+ * browser on the machine, and a phone already viewing through the relay.
+ */
+const RELAY_PAGES_PATH = '/relay/devices'
 
 /** The cell this page occupies: `<package name>#<row id>`, as the Plugins page keys rows. */
 const ROW_KEY = `${PACKAGE_NAME}#${RELAY_NAMESPACE}`
@@ -166,7 +187,12 @@ interface RelayClientContext {
     inject: (name: string, register: () => () => void) => () => void
     register: (spec: {
       name: string
-      key: string
+      /** Row cell key, for list slots whose rows own a configuration page (`plugins.row.config`). */
+      key?: string
+      /** Entry id, for the ordinary list seats (`sidebar.footer.action`). */
+      id?: string
+      /** Position among the seat's other entries. */
+      order?: number
       inject?: () => object
     }, component: unknown) => () => void
   }
@@ -184,7 +210,8 @@ export function apply(ctx: RelayClientContext): void {
   // Built here rather than inside the component so the staging survives a
   // render: rebuilding the form on every render would discard drafts the
   // person is still typing.
-  const controller = new RelayCardController(ctx.configForms.get(RELAY_NAMESPACE))
+  const section = ctx.configForms.get(RELAY_NAMESPACE)
+  const controller = new RelayCardController(section)
   ctx.effect(() => () => { controller.dispose() }, 'dsh-relay: settings form subscription')
   // `whileServed` ties the page to the Host: it registers once the describe
   // mirror carries the namespace and disposes when it stops, so a deployment
@@ -200,6 +227,32 @@ export function apply(ctx: RelayClientContext): void {
     }, RelayCard))),
     'dsh-relay: settings page',
   )
+  // The sidebar action is unconditional: unlike the settings page it is as
+  // useful to a paired phone as to this machine, and it needs no namespace to
+  // find the relay. `slots.inject` waits for the sidebar to declare the seat,
+  // so install order against the shell does not matter.
+  ctx.effect(
+    () => ctx.slots.inject(FOOTER_SLOT, () => ctx.slots.register({
+      name: FOOTER_SLOT,
+      id: RELAY_NAMESPACE,
+      order: 100,
+      inject: () => ({ open: openRelayPages }),
+    }, RelayFooterAction)),
+    'dsh-relay: sidebar action',
+  )
+}
+
+/**
+ * Change the page to the relay's own, in this window.
+ *
+ * In place is the point: the host half serves these pages on the harness origin
+ * too, so the desktop app's window shows them inside the app rather than
+ * handing off to a browser. It is also the only safe navigation — the relay's
+ * listener carries a self-signed certificate that the desktop shell cannot load,
+ * and a failed main-frame navigation there is fatal.
+ */
+function openRelayPages(): void {
+  window.location.assign(RELAY_PAGES_PATH)
 }
 
 /**
