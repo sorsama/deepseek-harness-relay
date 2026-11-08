@@ -20,6 +20,7 @@ import { Config, plainConfig } from '../src/config.ts'
 import { startListener, type RelayListener, type RelayRuntime } from '../src/server.ts'
 import { injectSecureContextShim } from '../src/secure-context.ts'
 import { RelayStore } from '../src/state.ts'
+import { pairingOrigins } from '../src/origins.ts'
 
 let upstream: Server
 let relay: RelayListener
@@ -400,6 +401,12 @@ describe('a locked-out caller is told to wait, not that the code was wrong', () 
 })
 
 describe('the pairing QR names an address a phone can reach', () => {
+  /** Two candidate adapters, the LAN one first — the same shape the relay computes at startup. */
+  const LAN_AND_VPN = pairingOrigins({
+    Ethernet: [{ address: '192.168.1.122', family: 'IPv4' }],
+    'Tailscale': [{ address: '100.121.55.94', family: 'IPv4' }],
+  }, 'https', 3443)
+
   it('falls back to loopback with a warning when the machine has no network address', async () => {
     const answer = await get('/relay/pair')
     expect(answer.status).toBe(200)
@@ -409,7 +416,7 @@ describe('the pairing QR names an address a phone can reach', () => {
   })
 
   it('uses the first network origin instead of loopback', async () => {
-    runtime.pairingOrigins = ['https://192.168.1.122:3443', 'https://10.0.0.4:3443']
+    runtime.pairingOrigins = LAN_AND_VPN
     const answer = await get('/relay/pair')
     expect(answer.status).toBe(200)
     // The instructions and the QR both name the reachable origin, not 127.0.0.1.
@@ -418,15 +425,26 @@ describe('the pairing QR names an address a phone can reach', () => {
     expect(answer.body).toContain('Address your device can reach')
   })
 
-  it('lets the operator pick another interface', async () => {
-    runtime.pairingOrigins = ['https://192.168.1.122:3443', 'https://10.0.0.4:3443']
-    const answer = await get(`/relay/pair?origin=${encodeURIComponent('https://10.0.0.4:3443')}`)
+  it('labels each option with its adapter and numeric address', async () => {
+    runtime.pairingOrigins = LAN_AND_VPN
+    const answer = await get('/relay/pair')
     expect(answer.status).toBe(200)
-    expect(answer.body).toContain('https://10.0.0.4:3443/relay/pair')
+    // The option text is readable; the value stays the full origin the QR needs.
+    expect(answer.body).toContain('>Ethernet — 192.168.1.122</option>')
+    expect(answer.body).toContain('>Tailscale — 100.121.55.94</option>')
+    expect(answer.body).toContain('value="https://100.121.55.94:3443"')
+    expect(answer.body).not.toContain('>https://192.168.1.122:3443</option>')
+  })
+
+  it('lets the operator pick another interface', async () => {
+    runtime.pairingOrigins = LAN_AND_VPN
+    const answer = await get(`/relay/pair?origin=${encodeURIComponent('https://100.121.55.94:3443')}`)
+    expect(answer.status).toBe(200)
+    expect(answer.body).toContain('https://100.121.55.94:3443/relay/pair')
   })
 
   it('ignores an origin that is not one of this machine\'s addresses', async () => {
-    runtime.pairingOrigins = ['https://192.168.1.122:3443']
+    runtime.pairingOrigins = LAN_AND_VPN
     const answer = await get(`/relay/pair?origin=${encodeURIComponent('https://attacker.example:3443')}`)
     expect(answer.status).toBe(200)
     expect(answer.body).not.toContain('attacker.example')

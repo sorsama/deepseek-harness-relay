@@ -15,6 +15,7 @@
  * @module dsh-relay/pages/views
  */
 
+import type { PairingAddress } from '../origins.ts'
 import type { DeviceRecord } from '../state.ts'
 import { escapeHtml, page } from './layout.ts'
 
@@ -132,7 +133,7 @@ export function pairPage(options: {
   readonly expiresInSeconds: number
   readonly url: string
   /** Every network origin a phone could use, default first; absent when there is only one. */
-  readonly origins?: readonly string[] | undefined
+  readonly origins?: readonly PairingAddress[] | undefined
   /** Whether the QR had to fall back to loopback because no network address was found. */
   readonly loopbackOnly?: boolean | undefined
   readonly plainUrl?: string | undefined
@@ -148,15 +149,22 @@ export function pairPage(options: {
   // The machine usually has more than one network address, and only the
   // operator knows which network the phone is on. Without this the QR names
   // whichever one the heuristic guessed first.
+  //
+  // Each option reads as `<adapter> — <numeric address>` instead of a full
+  // URL: the scheme and port are the same for every choice, and a raw IPv6 URL
+  // is close to unreadable on a phone. A Tailscale-like adapter is called
+  // Tailscale only when `origins.ts` verified the address belongs to Tailscale.
   const picker = options.origins === undefined
     ? ''
     : `<form method="get" action="/relay/pair" class="origins">
     <label for="origin">Address your device can reach</label>
     <select id="origin" name="origin">
-      ${options.origins.map(origin => `<option value="${escapeHtml(origin)}"${origin === options.url ? ' selected' : ''}>${escapeHtml(origin)}</option>`).join('\n      ')}
+      ${options.origins.map(entry => `<option value="${escapeHtml(entry.origin)}"${entry.origin === options.url ? ' selected' : ''}>${escapeHtml(entry.label)}</option>`).join('\n      ')}
     </select>
     <button class="outline" type="submit">Show this address</button>
-  </form>`
+  </form>
+  <p class="caption">Labels name the adapter and its numeric IP. <strong>Tailscale</strong> is shown only for
+     addresses verified to be Tailscale's own.</p>`
   const noNetwork = options.loopbackOnly !== true
     ? ''
     : `<div class="notice warn">No network address was found, so this QR points at loopback and no other

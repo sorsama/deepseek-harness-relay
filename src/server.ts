@@ -28,6 +28,7 @@ import type { Authenticator, CredentialClass, Identity } from './auth/index.ts'
 import type { Config } from './config.ts'
 import { checkFence, isLoopbackHostname } from './fence.ts'
 import { isPinnedMethod } from './privileged.ts'
+import type { PairingAddress } from './origins.ts'
 import { forward, type UpstreamTarget } from './proxy/http.ts'
 import { normalizeAddress } from './proxy/rewrite.ts'
 import { forwardUpgrade, rejectUpgrade, SocketLedger } from './proxy/ws.ts'
@@ -53,14 +54,14 @@ export interface RelayRuntime {
    */
   plainPort?: number | undefined
   /**
-   * Network origins a phone could reach this relay at, best guess first.
+   * Addresses a phone could reach this relay at, best guess first, labelled.
    *
    * The listener's own origin is whatever the client asked for; a client
    * sitting at the machine itself asks for loopback, which no phone can reach.
    * These are the alternatives the pairing page offers and the QR carries.
    * Assigned once the primary listener has a concrete port.
    */
-  pairingOrigins?: string[]
+  pairingOrigins?: PairingAddress[]
   /** Report a refusal; the plugin routes this to the Cordis logger. */
   readonly log: (message: string) => void
 }

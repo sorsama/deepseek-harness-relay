@@ -21,6 +21,7 @@ import type { Authenticator, Identity } from './auth/index.ts'
 import { SESSION_COOKIE } from './auth/index.ts'
 import { pairingPayload } from './auth/pairing.ts'
 import type { Config } from './config.ts'
+import type { PairingAddress } from './origins.ts'
 import { claimPage, devicesPage, loginPage, messagePage, pairPage, pairedPage, passwordPage } from './pages/views.ts'
 import { isLoopbackOrigin, pairingOriginOptions } from './origins.ts'
 import { parseFields, readBody, safeNextPath, sendHtml, sendJson, sendRedirect, sessionCookie, wantsJson } from './wire.ts'
@@ -37,13 +38,14 @@ export interface RouteContext {
   /** Origin the client reached this relay on, for links and the QR payload. */
   readonly origin: string
   /**
-   * Network origins a phone could reach this relay at, best guess first.
+   * Network origins a phone could reach this relay at, best guess first,
+   * each carrying the label the picker shows.
    *
    * The page is usually opened on the machine itself, whose own origin is
    * loopback — an address no phone can reach. These are the alternatives the
    * QR and the address picker use; empty when the machine has no other address.
    */
-  readonly pairingOrigins: readonly string[]
+  readonly pairingOrigins: readonly PairingAddress[]
   /** Plain-HTTP origin, when the compatibility listener is running. */
   readonly plainOrigin?: string | undefined
   /** SPKI pin of the served certificate; absent on a plaintext listener. */
@@ -90,11 +92,12 @@ async function renderQr(
   context: RouteContext,
   code: { code: string, expiresAt: number },
   selected: string,
-  options: readonly string[],
+  options: readonly PairingAddress[],
 ): Promise<string> {
+  const urls = options.map(entry => entry.origin)
   const payload = pairingPayload({
     url: selected,
-    urls: options.length > 1 ? options : undefined,
+    urls: urls.length > 1 ? urls : undefined,
     plainUrl: context.plainOrigin,
     fingerprint: context.fingerprint,
     code,
@@ -255,7 +258,9 @@ export async function handleRelayRoute(
       // so the operator picks (or the heuristic guesses) a network origin.
       const options = pairingOriginOptions(context.origin, context.pairingOrigins)
       const requested = url.searchParams.get('origin')
-      const selected = requested !== null && options.includes(requested) ? requested : options[0] ?? context.origin
+      const selected = requested !== null && options.some(option => option.origin === requested)
+        ? requested
+        : options[0]?.origin ?? context.origin
       sendHtml(res, 200, pairPage({
         qrSvg: await renderQr(context, code, selected, options),
         code: code.code,

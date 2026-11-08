@@ -95,7 +95,7 @@ That's expected on the machine running the harness. The relay treats loopback as
 
 ### The QR scans, but the phone cannot connect
 
-The QR encodes a network address, and the phone cannot use one it is not on. On the pairing page, pick the address under **Address your device can reach** and scan the new code. If the page says no network address was found, this machine is on no network the phone shares — open the relay's address on the phone directly and type the code instead.
+The QR encodes a network address, and the phone cannot use one it is not on. On the pairing page, pick the address under **Address your device can reach** and scan the new code. Each choice is labelled `<adapter> — <numeric IP>` (`Wi-Fi — 192.168.1.122`, `Tailscale — 100.121.55.94`), so pick the adapter your phone is on; a link-local address (`169.254.x.x`) only works on the same physical link and is labelled as such. If the page says no network address was found, this machine is on no network the phone shares — open the relay's address on the phone directly and type the code instead.
 
 ### `/relay/pair` on the harness port shows the pairing page
 

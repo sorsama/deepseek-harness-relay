@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.3.4 — 2026-11-09
+
+### Added
+
+- **The pairing page's address picker labels each address by adapter and
+  numeric IP.** The list used to show full URLs, so a phone's picker read
+  `https://[2405:9800:b521:f170:48fd:119e:a1e2:60a9]:3443` and two entries could
+  look interchangeable. Each choice now reads `Ethernet — 192.168.1.122`,
+  `Hyper-V — 172.17.112.1`, or `Tailscale — 100.121.55.94`. The full origin is
+  still the option's value, so the QR and the "show this address" form are
+  unchanged. Link-local addresses (`169.254.x.x`) say `Link-local`, because no
+  other device on the network can use one.
+- **Tailscale is verified before it is named.** An adapter called "Tailscale"
+  is not proof: a VPN client or a renamed NIC can claim that string, and
+  `100.64.0.0/10` is CGNAT that carriers also hand out. An address is shown as
+  Tailscale only when it is inside Tailscale's own `fd7a:115c:a1e0::/48` ULA
+  (either the address itself or another address on the same adapter, which is
+  how macOS's unhelpfully named `utun` adapters are recognised) or is a
+  `100.64.0.0/10` address on an adapter named Tailscale. An adapter named
+  Tailscale whose address fails that check reads `Tailscale (unverified)`, and
+  the page's caption says Tailscale is only shown for verified addresses.
+  README and TROUBLESHOOTING now explain the labels.
+
 ## 0.3.3 — 2026-11-06
 
 ### Fixed
