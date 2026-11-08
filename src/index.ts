@@ -317,8 +317,11 @@ async function start(
   const scheme = material === undefined ? 'http' : 'https'
   // The relay's own origin is whatever the operator asked for. When that is
   // loopback, a QR built from it names an address no phone can reach, so the
-  // candidate list is computed here and used by the pairing page.
-  runtime.pairingOrigins = pairingOrigins(systemInterfaces(), scheme, primary.port)
+  // candidate list is offered by the pairing page. It is a provider, not a
+  // snapshot: Tailscale being connected (or a laptop docking) after startup
+  // must appear on the next page load, and a cached list made it look as if
+  // no Tailscale address existed until the harness restarted.
+  runtime.pairingAddresses = () => pairingOrigins(systemInterfaces(), scheme, primary.port)
 
   // The relay's pages are ALSO served on the harness's own web server.
   //
@@ -371,7 +374,7 @@ async function start(
         identity: { credential: 'loopback', privileged: true },
         address,
         origin: `http://127.0.0.1:${String(upstreamPort)}`,
-        pairingOrigins: runtime.pairingOrigins ?? [],
+        pairingAddresses: runtime.pairingAddresses ?? (() => []),
         fingerprint: material?.record.fingerprint,
         secure: false,
         now: Date.now(),

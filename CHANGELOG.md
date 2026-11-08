@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.3.5 — 2026-11-09
+
+### Fixed
+
+- **A network that joins after startup now appears on the pairing page without
+  a restart.** The address candidates were computed once, when the relay
+  started. Connecting Tailscale (or docking, or joining Wi-Fi) after that left
+  the page stale: a connected tailnet showed only the stopped adapter's
+  link-local `169.254.x.x` address — and could keep showing addresses that no
+  longer existed — until the whole harness restarted. The pairing page now
+  reads the machine's interfaces when it renders, so `Tailscale — 100.x.y.z`
+  is offered on the next page load. The list is computed only for the pairing
+  page, never on proxied requests.
+
 ## 0.3.4 — 2026-11-09
 
 ### Added

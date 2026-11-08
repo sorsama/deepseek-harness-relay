@@ -38,14 +38,17 @@ export interface RouteContext {
   /** Origin the client reached this relay on, for links and the QR payload. */
   readonly origin: string
   /**
-   * Network origins a phone could reach this relay at, best guess first,
-   * each carrying the label the picker shows.
+   * The machine's network addresses a phone could reach this relay at, best
+   * guess first, each carrying the label the picker shows.
    *
-   * The page is usually opened on the machine itself, whose own origin is
-   * loopback — an address no phone can reach. These are the alternatives the
-   * QR and the address picker use; empty when the machine has no other address.
+   * Called when the pairing page renders rather than stored, so an adapter
+   * that joined a network after the relay started (a VPN, Tailscale) is
+   * offered without restarting the harness. The page is usually opened on the
+   * machine itself, whose own origin is loopback — an address no phone can
+   * reach — so these are the alternatives the QR and the address picker use;
+   * empty when the machine has no other address.
    */
-  readonly pairingOrigins: readonly PairingAddress[]
+  readonly pairingAddresses: () => readonly PairingAddress[]
   /** Plain-HTTP origin, when the compatibility listener is running. */
   readonly plainOrigin?: string | undefined
   /** SPKI pin of the served certificate; absent on a plaintext listener. */
@@ -256,7 +259,9 @@ export async function handleRelayRoute(
       // The page was most likely opened on this machine, whose own origin is
       // loopback. A QR naming that address scans fine and then cannot connect,
       // so the operator picks (or the heuristic guesses) a network origin.
-      const options = pairingOriginOptions(context.origin, context.pairingOrigins)
+      // Read the addresses now: the previous snapshot went stale the moment
+      // the machine joined a network the relay had not seen at startup.
+      const options = pairingOriginOptions(context.origin, context.pairingAddresses())
       const requested = url.searchParams.get('origin')
       const selected = requested !== null && options.some(option => option.origin === requested)
         ? requested

@@ -82,7 +82,7 @@ New to this? [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md) walks through ev
 
 4. **Pair your phone.** Still on that machine, open `https://127.0.0.1:3443/relay/pair` — or press **Relay** at the sidebar foot. Scan the QR code with your phone, or open the same path on the phone and type the code. Give the device a name, and it shows up under `/relay/devices`.
 
-   The QR names an address your phone can reach, not loopback. A machine with a virtual-machine adapter, a VPN, or two network cards has several addresses, and the page lists them: pick the one your phone is on, then scan. Until you do, the QR uses the best guess. Each choice reads as `<adapter> — <numeric IP>` — for example `Wi-Fi — 192.168.1.122` or `Tailscale — 100.121.55.94`. **Tailscale** is shown only when the address is verified to be Tailscale's own (inside `100.64.0.0/10` or `fd7a:115c:a1e0::/48`), never just because an adapter is named Tailscale.
+   The QR names an address your phone can reach, not loopback. A machine with a virtual-machine adapter, a VPN, or two network cards has several addresses, and the page lists them: pick the one your phone is on, then scan. Until you do, the QR uses the best guess. Each choice reads as `<adapter> — <numeric IP>` — for example `Wi-Fi — 192.168.1.122` or `Tailscale — 100.121.55.94`. **Tailscale** is shown only when the address is verified to be Tailscale's own (inside `100.64.0.0/10` or `fd7a:115c:a1e0::/48`), never just because an adapter is named Tailscale. The list is read when the page loads, so connecting Tailscale or joining a network after the relay started appears on the next reload.
 
 No `dsh` on your PATH? Every command works as `npx @deepseek-ai/dsh ...` instead.
 

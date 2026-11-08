@@ -401,7 +401,7 @@ describe('a locked-out caller is told to wait, not that the code was wrong', () 
 })
 
 describe('the pairing QR names an address a phone can reach', () => {
-  /** Two candidate adapters, the LAN one first — the same shape the relay computes at startup. */
+  /** Two candidate adapters, the LAN one first — the same shape the relay computes per page load. */
   const LAN_AND_VPN = pairingOrigins({
     Ethernet: [{ address: '192.168.1.122', family: 'IPv4' }],
     'Tailscale': [{ address: '100.121.55.94', family: 'IPv4' }],
@@ -416,7 +416,7 @@ describe('the pairing QR names an address a phone can reach', () => {
   })
 
   it('uses the first network origin instead of loopback', async () => {
-    runtime.pairingOrigins = LAN_AND_VPN
+    runtime.pairingAddresses = () => LAN_AND_VPN
     const answer = await get('/relay/pair')
     expect(answer.status).toBe(200)
     // The instructions and the QR both name the reachable origin, not 127.0.0.1.
@@ -426,7 +426,7 @@ describe('the pairing QR names an address a phone can reach', () => {
   })
 
   it('labels each option with its adapter and numeric address', async () => {
-    runtime.pairingOrigins = LAN_AND_VPN
+    runtime.pairingAddresses = () => LAN_AND_VPN
     const answer = await get('/relay/pair')
     expect(answer.status).toBe(200)
     // The option text is readable; the value stays the full origin the QR needs.
@@ -436,15 +436,40 @@ describe('the pairing QR names an address a phone can reach', () => {
     expect(answer.body).not.toContain('>https://192.168.1.122:3443</option>')
   })
 
+  it('picks up an adapter that joined a network after the relay started', async () => {
+    // Tailscale connecting — or a laptop docking — changes the interface map
+    // while the relay is already listening. A list snapshotted at startup made
+    // a connected tailnet look absent until the whole harness was restarted.
+    let addresses = pairingOrigins({ Ethernet: [{ address: '192.168.1.122', family: 'IPv4' }] }, 'https', 3443)
+    runtime.pairingAddresses = () => addresses
+
+    const before = await get('/relay/pair')
+    // One candidate: no picker, but the QR and the instructions name it.
+    expect(before.body).toContain('https://192.168.1.122:3443/relay/pair')
+    expect(before.body).not.toContain('100.121.55.94')
+
+    addresses = pairingOrigins({
+      Ethernet: [{ address: '192.168.1.122', family: 'IPv4' }],
+      'Tailscale': [
+        { address: '100.121.55.94', family: 'IPv4' },
+        { address: 'fd7a:115c:a1e0::fc01:3761', family: 'IPv6' },
+      ],
+    }, 'https', 3443)
+
+    const after = await get('/relay/pair')
+    expect(after.body).toContain('>Tailscale — 100.121.55.94</option>')
+    expect(after.body).toContain('>Tailscale — fd7a:115c:a1e0::fc01:3761</option>')
+  })
+
   it('lets the operator pick another interface', async () => {
-    runtime.pairingOrigins = LAN_AND_VPN
+    runtime.pairingAddresses = () => LAN_AND_VPN
     const answer = await get(`/relay/pair?origin=${encodeURIComponent('https://100.121.55.94:3443')}`)
     expect(answer.status).toBe(200)
     expect(answer.body).toContain('https://100.121.55.94:3443/relay/pair')
   })
 
   it('ignores an origin that is not one of this machine\'s addresses', async () => {
-    runtime.pairingOrigins = LAN_AND_VPN
+    runtime.pairingAddresses = () => LAN_AND_VPN
     const answer = await get(`/relay/pair?origin=${encodeURIComponent('https://attacker.example:3443')}`)
     expect(answer.status).toBe(200)
     expect(answer.body).not.toContain('attacker.example')
