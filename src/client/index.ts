@@ -152,9 +152,11 @@ const FIELD_SPECS: readonly RelayFieldSpec[] = [
   numberField('port'),
   numberField('proxyTimeoutMs'),
   numberField('rateLimitPerMinute'),
+  numberField('peerTimeoutMs'),
   choiceField('privilegedMethods', ['allow-authenticated', 'loopback-only']),
   booleanField('uiLink'),
   booleanField('mdns'),
+  booleanField('peersEnabled'),
 ]
 
 /** The writes one page's slot entry injects. */
@@ -293,9 +295,11 @@ class RelayCardController {
       port: this.#form.field('port'),
       proxyTimeoutMs: this.#form.field('proxyTimeoutMs'),
       rateLimitPerMinute: this.#form.field('rateLimitPerMinute'),
+      peerTimeoutMs: this.#form.field('peerTimeoutMs'),
       privilegedMethods: this.#form.field('privilegedMethods'),
       uiLink: this.#form.field('uiLink'),
       mdns: this.#form.field('mdns'),
+      peersEnabled: this.#form.field('peersEnabled'),
     }
   }
 

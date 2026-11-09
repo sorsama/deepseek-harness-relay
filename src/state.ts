@@ -19,8 +19,14 @@ import { randomBytes } from 'node:crypto'
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
-/** On-disk format version; a file stamped with anything else is refused. */
-const STATE_VERSION = 1 as const
+/**
+ * On-disk format version; a file stamped with anything else is refused.
+ *
+ * 2 adds `peers`: relays this machine has linked with as another computer.
+ * A 1 file is upgraded on open, in place, keeping devices, grants, and the
+ * certificate, so an install that predates computer linking keeps working.
+ */
+const STATE_VERSION = 2 as const
 
 /** File name under the relay state directory. */
 const STATE_FILE = 'state.json'
@@ -67,6 +73,43 @@ export interface AddressGrant {
   readonly expiresAt: number
 }
 
+/**
+ * One linked computer: another relay this machine pairs with as a peer.
+ *
+ * Two tokens keep one link alive, one per direction. The peer holds the token
+ * it uses to call this relay, of which only {@link inboundTokenHash} is kept
+ * here. This relay holds the token it uses to call the peer, in plaintext,
+ * because it must present it; the state file is owner-only for that reason,
+ * exactly like the signing key beside it.
+ */
+export interface PeerRecord {
+  /** Local id, also the unlink handle. */
+  readonly id: string
+  /** Id both sides recorded for this link, so a log line names the same pair. */
+  readonly linkId: string
+  /** The other computer's name, as it introduced itself. */
+  name: string
+  /** Origin of the other relay: `https://host:port`, never loopback. */
+  readonly url: string
+  /**
+   * SPKI fingerprint of the other relay's certificate, base64 SHA-256.
+   *
+   * Every call to the peer is checked against this, so a changed certificate
+   * ends the link instead of quietly trusting a new key.
+   */
+  readonly fingerprint: string
+  /** Keyed hash of the token the peer presents to this relay. */
+  readonly inboundTokenHash: string
+  /** Token this relay presents to the peer. */
+  readonly outboundToken: string
+  /** Epoch millis the link was made. */
+  readonly createdAt: number
+  /** Epoch millis this relay last reached the peer, or the peer reached it. */
+  lastSeenAt?: number
+  /** Source address of the peer's last call, when it called this relay. */
+  lastAddress?: string
+}
+
 /** The password sign-in credential, stored as a salted scrypt hash. */
 export interface PasswordRecord {
   /** Per-install salt, hex. */
@@ -99,6 +142,8 @@ export interface RelayState {
   password?: PasswordRecord
   devices: Record<string, DeviceRecord>
   grants: Record<string, AddressGrant>
+  /** Linked computers, newest first on read. Absent in a v1 file until upgraded. */
+  peers: Record<string, PeerRecord>
   certificate?: CertificateRecord
 }
 
@@ -109,7 +154,15 @@ function emptyState(): RelayState {
     signingKey: randomBytes(32).toString('base64url'),
     devices: {},
     grants: {},
+    peers: {},
   }
+}
+
+/** Serialize and atomically replace the state file. */
+async function writeStateFile(file: string, state: RelayState): Promise<void> {
+  const temp = `${file}.${randomBytes(6).toString('hex')}.tmp`
+  await writeFile(temp, `${JSON.stringify(state, null, 2)}\n`, { mode: SECRET_MODE })
+  await rename(temp, file)
 }
 
 /**
@@ -141,15 +194,52 @@ export class RelayStore {
     let state: RelayState
     try {
       const raw = await readFile(file, 'utf8')
-      const parsed = JSON.parse(raw) as RelayState
-      if (parsed.version !== STATE_VERSION) {
+      // Read through a shape with a numeric version, so both the v1 upgrade
+      // and the version check are reachable in the type system.
+      const parsed = JSON.parse(raw) as {
+        readonly version: number
+        readonly signingKey?: string
+        readonly password?: PasswordRecord
+        readonly devices?: Record<string, DeviceRecord>
+        readonly grants?: Record<string, AddressGrant>
+        readonly peers?: Record<string, PeerRecord>
+        readonly certificate?: CertificateRecord
+      }
+      if (parsed.version !== 1 && parsed.version !== STATE_VERSION) {
         throw new Error(`dsh-relay: ${file} has format version ${String(parsed.version)}, expected ${String(STATE_VERSION)}`)
       }
-      state = { ...parsed, devices: parsed.devices ?? {}, grants: parsed.grants ?? {} }
+      if (typeof parsed.signingKey !== 'string') {
+        throw new Error(`dsh-relay: ${file} has no signing key, so it is not a relay state file`)
+      }
+      if (parsed.version === 1) {
+        // Upgrade in place before serving a request. Devices, grants, and the
+        // certificate carry over untouched; a phone paired before this release
+        // stays paired, and its token keeps verifying.
+        state = {
+          version: STATE_VERSION,
+          signingKey: parsed.signingKey,
+          devices: parsed.devices ?? {},
+          grants: parsed.grants ?? {},
+          peers: {},
+          ...parsed.password === undefined ? {} : { password: parsed.password },
+          ...parsed.certificate === undefined ? {} : { certificate: parsed.certificate },
+        }
+        await writeStateFile(file, state)
+      } else {
+        state = {
+          version: STATE_VERSION,
+          signingKey: parsed.signingKey,
+          devices: parsed.devices ?? {},
+          grants: parsed.grants ?? {},
+          peers: parsed.peers ?? {},
+          ...parsed.password === undefined ? {} : { password: parsed.password },
+          ...parsed.certificate === undefined ? {} : { certificate: parsed.certificate },
+        }
+      }
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
       state = emptyState()
-      await writeFile(file, `${JSON.stringify(state, null, 2)}\n`, { mode: SECRET_MODE })
+      await writeStateFile(file, state)
     }
     return new RelayStore(file, state)
   }
@@ -172,9 +262,7 @@ export class RelayStore {
       if (this.#closed) throw new Error('dsh-relay: state store is closed')
       const draft = structuredClone(this.#state) as RelayState
       mutate(draft)
-      const temp = `${this.file}.${randomBytes(6).toString('hex')}.tmp`
-      await writeFile(temp, `${JSON.stringify(draft, null, 2)}\n`, { mode: SECRET_MODE })
-      await rename(temp, this.file)
+      await writeStateFile(this.file, draft)
       this.#state = draft
     })
     // Keep the chain alive after a rejection so one failed write does not wedge

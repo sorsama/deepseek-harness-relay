@@ -11,6 +11,51 @@ dsh-relay is a plugin for the harness's web profile. It puts HTTPS, a password, 
 
 It's built on DeepSeek Harness, but it isn't an official DeepSeek project.
 
+## Install
+
+The plugin installs straight from this repository, so the GitHub URL is all you need — no local checkout, and nothing to build by hand.
+
+**In the harness.** Open **Plugins** in the sidebar, choose **Add plugin**, paste this URL, and press **Install**:
+
+```
+https://github.com/sorsama/deepseek-harness-relay
+```
+
+The first install fetches the plugin's sources and builds them in a temporary copy on your machine, which takes a few seconds. pnpm refuses a git package's build script until you allow it, so the installer asks; choose **Allow these scripts and retry**. When it finishes, choose **Enable now**, or switch the bundle on in the list.
+
+**From a terminal.** The same URL works with the CLI, which forwards to pnpm inside the profile:
+
+```sh
+dsh plugin --profile web add https://github.com/sorsama/deepseek-harness-relay
+```
+
+For the desktop app, use **Plugins** inside the app, or target its profile:
+
+```sh
+dsh plugin --profile desktop add https://github.com/sorsama/deepseek-harness-relay
+```
+
+If the terminal install stops with `allowBuilds`, copy the block pnpm printed into the profile's `pnpm-workspace.yaml` and run the same command again. It looks like this:
+
+```yaml
+allowBuilds:
+  'dsh-relay@https://codeload.github.com/sorsama/deepseek-harness-relay/tar.gz/<commit>': true
+```
+
+The **Plugins** dialog writes that permission for you.
+
+The URL installs whatever is on `main`, which is the latest release. To pin a release or a commit, use pnpm's shorthand with a tag or SHA:
+
+```sh
+dsh plugin --profile web add 'github:sorsama/deepseek-harness-relay#v0.3.5'
+```
+
+Prefer files that are already built? The npm package is the same code with `lib/` in it, and installing it runs no build script:
+
+```sh
+dsh plugin --profile web add dsh-relay
+```
+
 ## Why this exists
 
 The harness web app only listens on `127.0.0.1`, so only the computer running it can open it. That's deliberate. The harness is a coding agent that runs commands on your machine, and its authors refuse `dsh web --host 0.0.0.0` because it "would expose remote code execution to the network".
@@ -41,6 +86,7 @@ Harness 0.1.2 and later have a sign-in of their own (a browser session cookie). 
 - mDNS advertisement on `_dsh._tcp`, so apps can find the relay without scanning your subnet.
 - The full harness web UI, unchanged, with a small **Relay** link in the corner when the page is served through the relay.
 - A **Relay** action at the sidebar foot, one click from the account menu, that changes the app to the relay's pairing, device, and password pages — in place, in the same window.
+- A **Computers** page that links this relay with another PC in either direction: share this PC, or connect to another one and open its harness in this browser with one click.
 - A settings page at **Plugins → dsh-relay → Configure** on the machine running the harness. Changes apply when you press Save, with no restart.
 
 ## Supported harness versions
@@ -55,13 +101,7 @@ If you install a version that doesn't match your harness, the harness refuses to
 
 ### The desktop app
 
-The DeepSeek Harness desktop app runs the same web-app profile, so the relay works there too — it fronts the app's internal loopback server, and you don't need to run `dsh web` beside it. Install into the app's profile instead of `web`:
-
-```sh
-dsh plugin --profile desktop add dsh-relay
-```
-
-Restart the app to load it. `https://127.0.0.1:3443/relay/health` answers once the relay is up. Do not add a redirect from the harness's own port to the relay's origin: the app's window cannot complete a navigation to the relay's self-signed certificate, and that failure is fatal to the app.
+The DeepSeek Harness desktop app runs the same web-app profile, so the relay works there too — it fronts the app's internal loopback server, and you don't need to run `dsh web` beside it. Install it from inside the app: **Plugins → Add plugin**, paste the GitHub URL, press **Install**, then **Enable now**, and restart the app to load it. `https://127.0.0.1:3443/relay/health` answers once the relay is up. Do not add a redirect from the harness's own port to the relay's origin: the app's window cannot complete a navigation to the relay's self-signed certificate, and that failure is fatal to the app.
 
 ## Quick start
 
@@ -69,14 +109,7 @@ New to this? [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md) walks through ev
 
 1. **Remove the LAN patch if you have one.** If `~/.dsh/profiles/web/cordis.patch.yml` binds the harness to `0.0.0.0`, delete that row. The relay won't start in front of a harness that's already open to the network.
 
-2. **Install the plugin and restart the harness.**
-
-   ```sh
-   dsh plugin --profile web add dsh-relay
-   dsh web
-   ```
-
-   The package ships prebuilt, so nothing compiles on your machine. When the harness starts, it prints the relay's address.
+2. **Start the harness.** When the plugin is installed and enabled, the harness prints the relay's address as it starts. In the desktop app, quit and reopen it after enabling the plugin.
 
 3. **Set a password.** On the machine running the harness, open `https://127.0.0.1:3443/relay/password`. Until a password exists, this page only works from that machine, so nobody on your network can claim the relay first.
 
@@ -87,6 +120,20 @@ New to this? [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md) walks through ev
 No `dsh` on your PATH? Every command works as `npx @deepseek-ai/dsh ...` instead.
 
 You won't be asked for a password on the machine running the harness. Anyone sitting at that keyboard already has a shell, so the relay treats loopback as you. The password is for everything else on the network.
+
+## Linking another PC
+
+Both computers run dsh-relay. One of them shows a pairing code; the other enters it once, and from then on either computer can open the other's harness in one click.
+
+1. On the computer you want to open, open `https://<its address>:<port>/relay/pair` — or press **Relay** at the sidebar foot, then **Pair a device**. Note its address, the code, and the certificate pin.
+2. On the computer you are sitting at, press **Relay** at the sidebar foot, then choose **Computers** — or open `https://<its address>:<port>/relay/computers` in a browser.
+3. Under **Connect to another PC**, choose the address this computer will offer the other one, then enter the other computer's address, its code, and its pin. Press **Connect**.
+
+Both Computers pages now list the pair. **Open** hands this browser a one-time sign-in on the other computer and lands on its harness, with no password to retype. The browser may warn once about that computer's self-signed certificate; accept it for that address.
+
+The other computer records this one at the same moment, so the pair shows on both sides. **Unlink** on either computer ends it, and **Sign out everywhere** ends every link along with every session and device. Linking needs TLS on both computers and is refused on plain HTTP; both need **Link with other computers** on, which is the default.
+
+This works in a browser. The DeepSeek Harness desktop app still cannot load a remote harness, because its window is tied to its own local server.
 
 ## Using it with DSH Mobile
 
@@ -162,6 +209,8 @@ pnpm build        # tsc -b, then tsdown
 pnpm test
 pnpm typecheck
 ```
+
+A GitHub install runs `scripts/prepare.mjs`, which does the same tsdown build on its own — no monorepo, no `tsc -b`, no typecheck — and withdraws the browser half rather than leaving the harness a bundle it refuses to boot with. Keep that script working when you change the build.
 
 [CONTRIBUTING.md](CONTRIBUTING.md) covers running a source checkout against a real harness and how releases work.
 

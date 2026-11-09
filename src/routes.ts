@@ -20,10 +20,23 @@ import QRCode from 'qrcode'
 import type { Authenticator, Identity } from './auth/index.ts'
 import { SESSION_COOKIE } from './auth/index.ts'
 import { pairingPayload } from './auth/pairing.ts'
+import type { ComputersContext } from './computers.ts'
+import { acceptLink, connectToPeer, listPeers, openNonces, requestOpen } from './computers.ts'
 import type { Config } from './config.ts'
 import type { PairingAddress } from './origins.ts'
-import { claimPage, devicesPage, loginPage, messagePage, pairPage, pairedPage, passwordPage } from './pages/views.ts'
 import { isLoopbackOrigin, pairingOriginOptions } from './origins.ts'
+import { peerName } from './peers.ts'
+import {
+  claimPage,
+  computersPage,
+  devicesPage,
+  handoffPage,
+  loginPage,
+  messagePage,
+  pairPage,
+  pairedPage,
+  passwordPage,
+} from './pages/views.ts'
 import { parseFields, readBody, safeNextPath, sendHtml, sendJson, sendRedirect, sessionCookie, wantsJson } from './wire.ts'
 
 /** Prefix owning every route in this module. */
@@ -66,6 +79,53 @@ function isOperator(identity: Identity): boolean {
 /** Whether this identity may see the harness at all. */
 export function isAuthenticated(identity: Identity): boolean {
   return identity.credential !== 'none'
+}
+
+/**
+ * The context the linking handlers work from.
+ * @param context - this request's route context.
+ * @returns the same facts, narrowed to what computer linking needs.
+ */
+function computersContextOf(context: RouteContext): ComputersContext {
+  return {
+    auth: context.auth,
+    config: context.config,
+    origin: context.origin,
+    fingerprint: context.fingerprint,
+    address: context.address,
+    now: context.now,
+  }
+}
+
+/**
+ * Render the Computers page from live state, probing each link as it does.
+ * @param context - this request's route context.
+ * @param extra - an error to show, or which confirmation was just completed.
+ * @returns the document.
+ */
+async function renderComputers(
+  context: RouteContext,
+  extra: { readonly error?: string | undefined, readonly linked?: boolean | undefined, readonly unlinked?: boolean | undefined },
+): Promise<string> {
+  const peers = await listPeers(computersContextOf(context))
+  // A loopback origin is this machine talking to itself; the other computer
+  // cannot use it. The pairing page keeps it as a last-resort QR target, but
+  // here it would only offer a link that is guaranteed to fail.
+  const origins = pairingOriginOptions(context.origin, context.pairingAddresses())
+    .filter(entry => !isLoopbackOrigin(entry.origin))
+  return computersPage({
+    name: peerName(),
+    now: context.now,
+    origins,
+    fingerprint: context.fingerprint,
+    tlsMode: context.config.tls,
+    hasPassword: context.auth.hasPassword,
+    deviceCount: context.auth.devices.length,
+    peers,
+    enabled: context.config.peersEnabled,
+    navigable: context.secure,
+    ...extra,
+  })
 }
 
 /**
@@ -371,6 +431,139 @@ export async function handleRelayRoute(
     await auth.signOutEverywhere()
     const cookie = sessionCookie({ name: SESSION_COOKIE, value: '', maxAgeSeconds: 0, secure: context.secure })
     sendRedirect(res, '/relay/login', { 'set-cookie': cookie })
+    return
+  }
+
+  // ---- linked computers
+
+  if (path === '/relay/computers' && method === 'GET') {
+    if (!isOperator(identity)) { refuse(req, res, 'Sign in to manage computers.'); return }
+    sendHtml(res, 200, await renderComputers(context, {
+      linked: url.searchParams.get('linked') === '1',
+      unlinked: url.searchParams.get('unlinked') === '1',
+    }))
+    return
+  }
+
+  if (path === '/relay/computers/connect' && method === 'POST') {
+    if (!isOperator(identity)) { refuse(req, res, 'Sign in to link another computer.'); return }
+    const body = await readBody(req)
+    if (body === undefined) { refuse(req, res, 'Request too large.'); return }
+    const fields = parseFields(req, body)
+    const result = await connectToPeer(computersContextOf(context), {
+      url: fields.url ?? '',
+      code: fields.code ?? '',
+      selfUrl: fields.selfUrl ?? '',
+      pin: fields.pin,
+    })
+    if (!result.ok) {
+      sendHtml(res, 400, await renderComputers(context, { error: result.error }))
+      return
+    }
+    sendRedirect(res, '/relay/computers?linked=1')
+    return
+  }
+
+  if (path === '/relay/computers/open' && method === 'POST') {
+    if (!isOperator(identity)) { refuse(req, res, 'Sign in to open another computer.'); return }
+    // The harness-origin copy of this page is the desktop app's window. A
+    // redirect there onto another computer's self-signed certificate is a
+    // failed main-frame navigation, which Electron reports as a crash and the
+    // app restarts onto. The link still works from a browser on the relay's
+    // own address, which is what the page tells the person to use.
+    if (!context.secure) {
+      sendHtml(res, 400, await renderComputers(context, {
+        error: 'Open from a browser at this PC\'s relay address. The harness window cannot load another computer\'s self-signed certificate.',
+      }))
+      return
+    }
+    const body = await readBody(req)
+    if (body === undefined) { refuse(req, res, 'Request too large.'); return }
+    const fields = parseFields(req, body)
+    const result = await requestOpen(computersContextOf(context), fields.peerId ?? '')
+    if ('error' in result) {
+      sendHtml(res, 400, await renderComputers(context, { error: result.error }))
+      return
+    }
+    sendRedirect(res, result.url)
+    return
+  }
+
+  if (path === '/relay/computers/unlink' && method === 'POST') {
+    if (!isOperator(identity)) { refuse(req, res, 'Sign in to unlink a computer.'); return }
+    const body = await readBody(req)
+    if (body === undefined) { refuse(req, res, 'Request too large.'); return }
+    const fields = parseFields(req, body)
+    const removed = await auth.removePeer(fields.peerId ?? '')
+    if (!removed) {
+      sendHtml(res, 400, await renderComputers(context, { error: 'That computer is not linked.' }))
+      return
+    }
+    sendRedirect(res, '/relay/computers?unlinked=1')
+    return
+  }
+
+  if (path === '/relay/link' && method === 'POST') {
+    const body = await readBody(req)
+    if (body === undefined) {
+      sendJson(res, 413, { error: 'too-large', message: 'Request too large.' })
+      return
+    }
+    const answer = await acceptLink(computersContextOf(context), parseFields(req, body))
+    sendJson(res, answer.status, answer.body)
+    return
+  }
+
+  if (path === '/relay/peer/status' && method === 'GET') {
+    if (!config.peersEnabled) { sendJson(res, 404, { error: 'not-found' }); return }
+    const peer = auth.identifyPeer(req.headers)
+    if (peer === undefined) {
+      sendJson(res, 403, { error: 'forbidden', message: 'link token not accepted' })
+      return
+    }
+    await auth.touchPeer(peer.id, context.address, now)
+    sendJson(res, 200, { ok: true, service: 'dsh-relay', name: peerName() })
+    return
+  }
+
+  if (path === '/relay/peer/open' && method === 'POST') {
+    if (!config.peersEnabled) { sendJson(res, 404, { error: 'not-found' }); return }
+    const peer = auth.identifyPeer(req.headers)
+    if (peer === undefined) {
+      sendJson(res, 403, { error: 'forbidden', message: 'link token not accepted' })
+      return
+    }
+    await auth.touchPeer(peer.id, context.address, now)
+    const nonce = openNonces.issue(peer.id, now)
+    sendJson(res, 200, { url: `${context.origin}/relay/peer/enter?nonce=${encodeURIComponent(nonce)}` })
+    return
+  }
+
+  if (path === '/relay/peer/enter' && method === 'GET') {
+    if (!config.peersEnabled) { sendJson(res, 404, { error: 'not-found' }); return }
+    const nonce = url.searchParams.get('nonce') ?? ''
+    const peerId = openNonces.consume(nonce, now)
+    const peer = peerId === undefined ? undefined : auth.peers.find(entry => entry.id === peerId)
+    if (peer === undefined) {
+      // 403 like every other unauthorized answer. The nonce is single-use, so
+      // a reload after the cookie was set lands here: the person is already
+      // signed in and only needs the harness itself, which the button reaches.
+      sendHtml(res, 403, messagePage({
+        title: 'Link not accepted',
+        message: 'That handoff link was already used, has expired, or the link was removed. Open the computer again from the other PC.',
+        kind: 'error',
+      }))
+      return
+    }
+    const grant = auth.sessionGrant(now)
+    const cookie = sessionCookie({
+      name: SESSION_COOKIE,
+      value: grant.cookie,
+      maxAgeSeconds: Math.floor(config.sessionTtlMs / 1000),
+      secure: context.secure,
+    })
+    void auth.touchPeer(peer.id, context.address, now)
+    sendHtml(res, 200, handoffPage(peer.name), { 'set-cookie': cookie, 'referrer-policy': 'no-referrer' })
     return
   }
 

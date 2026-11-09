@@ -16,7 +16,7 @@
  */
 
 import type { PairingAddress } from '../origins.ts'
-import type { DeviceRecord } from '../state.ts'
+import type { DeviceRecord, PeerRecord } from '../state.ts'
 import { escapeHtml, page } from './layout.ts'
 
 /** Hex digits of a device id shown next to its name. */
@@ -189,6 +189,7 @@ export function pairPage(options: {
       <button class="outline" type="submit">New code</button>
     </form>
     <a class="btn outline" href="/relay/devices">Paired devices</a>
+    <a class="btn outline" href="/relay/computers">Computers</a>
   </div>
   <div class="actions">
     <a class="btn ghost" href="/">Back to the harness</a>
@@ -330,6 +331,7 @@ export function devicesPage(options: {
     <form method="post" action="/relay/pair/new">
       <button class="primary" type="submit">Pair a new device</button>
     </form>
+    <a class="btn outline" href="/relay/computers">Computers</a>
   </div>
   <div class="actions">
     <a class="btn outline" href="/relay/password">${options.hasPassword ? 'Change the password' : 'Set a password'}</a>
@@ -341,6 +343,176 @@ export function devicesPage(options: {
   <div class="actions">
     <a class="btn ghost" href="/">Back to the harness</a>
   </div>`,
+  })
+}
+
+/**
+ * The computers page: this PC's shared state, the form that links another PC,
+ * and the linked computers with their last observed reachability.
+ *
+ * Linking is a two-step act on two machines: the other PC shows a pairing code
+ * and its address, and this page takes them. The reverse record is written by
+ * the other relay when it accepts the code, which is what makes the pair show
+ * on both sides without a second visit.
+ * @param options - this PC's posture and its live links.
+ * @returns the full HTML document.
+ */
+export function computersPage(options: {
+  readonly name: string
+  readonly now: number
+  readonly origins: readonly PairingAddress[]
+  readonly fingerprint?: string | undefined
+  readonly tlsMode: string
+  readonly hasPassword: boolean
+  readonly deviceCount: number
+  readonly peers: readonly { readonly peer: PeerRecord, readonly online: boolean }[]
+  readonly enabled: boolean
+  /** Whether this page can navigate to a peer, which needs the relay's own TLS origin. */
+  readonly navigable: boolean
+  readonly error?: string | undefined
+  readonly linked?: boolean | undefined
+  readonly unlinked?: boolean | undefined
+}): string {
+  const notices = [
+    options.error === undefined ? '' : `<div class="notice error">${escapeHtml(options.error)}</div>`,
+    options.linked === true ? '<div class="notice tip">Linked. The other computer records this one too, so both lists show the pair.</div>' : '',
+    options.unlinked === true ? '<div class="notice tip">Unlinked. The other computer sees the link stop working on its next call.</div>' : '',
+    options.navigable
+      ? ''
+      : '<div class="notice warn">Open a linked computer from a browser at this PC\'s own relay address, not from the harness window: the window cannot load another computer\'s self-signed certificate, and a failed navigation there takes the app down. Linking itself works here.</div>',
+    options.enabled && options.fingerprint !== undefined && options.origins.length === 0
+      ? '<div class="notice warn">No network address was found, so this PC has no handoff address to offer the other computer. Connect this PC to the network the other computer is on, then reload this page.</div>'
+      : '',
+    options.enabled
+      ? ''
+      : '<div class="notice warn">Linking computers is turned off in this relay\'s settings. Turn on <strong>Link with other computers</strong> under Plugins → dsh-relay → Configure.</div>',
+  ].join('\n  ')
+
+  const addresses = options.origins.length === 0
+    ? '<span class="sub">No network address was found.</span>'
+    : options.origins.map(entry => `<span class="sub mono">${escapeHtml(entry.origin)}</span> <span class="sub">${escapeHtml(entry.label)}</span>`).join('<br>')
+
+  const pin = options.fingerprint === undefined
+    ? '<div class="notice warn">This relay is serving plaintext. Linking another PC needs TLS on both sides, so it cannot start here.</div>'
+    : `<p class="caption fingerprint">Certificate pin (SHA-256/SPKI)<br><span class="mono">${escapeHtml(options.fingerprint)}</span></p>`
+
+  const originOptions = options.origins
+    .map(entry => `<option value="${escapeHtml(entry.origin)}">${escapeHtml(entry.label)}</option>`)
+    .join('\n        ')
+
+  const connectForm = options.enabled && options.origins.length > 0 && options.fingerprint !== undefined
+    ? `<h2>Connect to another PC</h2>
+  <p>On the other PC, open its <strong>Pair a device</strong> page. It shows the code and pin this form asks for.</p>
+  <form method="post" action="/relay/computers/connect">
+    <label for="selfUrl">This PC's address the other PC will use</label>
+    <select id="selfUrl" name="selfUrl" autocomplete="off">
+        ${originOptions}
+    </select>
+    <label for="url">The other PC's relay address</label>
+    <input id="url" name="url" type="url" inputmode="url" required placeholder="https://192.168.1.10:3443">
+    <label for="code">Pairing code</label>
+    <input id="code" name="code" type="text" inputmode="numeric" autocomplete="one-time-code" required>
+    <label for="pin">Certificate pin (optional)</label>
+    <input id="pin" name="pin" type="text" autocomplete="off" placeholder="The other PC's pairing page shows it">
+    <button class="primary" type="submit">Connect</button>
+  </form>
+  <p class="caption">The pin is optional but recommended: it proves the certificate before the code is spent. Without it, the first certificate seen is recorded and checked on every later call.</p>`
+    : ''
+
+  const linked = options.peers.length === 0
+    ? '<p class="caption">No computers linked yet.</p>'
+    : options.peers.map(({ peer, online }) => `
+    <div class="row">
+      <div class="meta">
+        <span class="name">${escapeHtml(peer.name)} <span class="mono">${escapeHtml(peer.linkId.slice(-4))}</span></span>
+        <span class="sub mono">${escapeHtml(peer.url)}</span>
+        <span class="sub">${online ? 'reachable' : 'not answering'} &middot; last seen ${
+          escapeHtml(since(peer.lastSeenAt, options.now))}</span>
+      </div>
+      <div class="end">
+        <span class="dot ${online ? 'ok' : 'off'}"></span>
+        ${online && options.navigable
+          ? `<form method="post" action="/relay/computers/open">
+          <input type="hidden" name="peerId" value="${escapeHtml(peer.id)}">
+          <button class="primary sm" type="submit">Open</button>
+        </form>`
+          : '<button class="primary sm" type="button" disabled>Open</button>'}
+        <form method="post" action="/relay/computers/unlink">
+          <input type="hidden" name="peerId" value="${escapeHtml(peer.id)}">
+          <button class="outline sm" type="submit">Unlink</button>
+        </form>
+      </div>
+    </div>`).join('')
+
+  return page({
+    wide: true,
+    title: 'Computers',
+    body: `
+  <h1>Computers</h1>
+  <p>This PC shares its harness through this relay. Linking another PC lets this browser open that PC's harness in one click, and lets its operator open this one.</p>
+  ${notices}
+  <div class="rows">
+    <div class="row">
+      <div class="meta">
+        <span class="name">${escapeHtml(options.name)}</span>
+        <span class="sub">this computer &middot; TLS ${escapeHtml(options.tlsMode)}</span>
+      </div>
+      <span class="dot ok"></span>
+    </div>
+    <div class="row">
+      <div class="meta">
+        <span class="name">Reachable at</span>
+        ${addresses}
+      </div>
+    </div>
+    <div class="row">
+      <div class="meta">
+        <span class="name">Password sign-in</span>
+        <span class="sub">${options.hasPassword ? 'set' : 'not set — nobody can sign in from the network'}</span>
+      </div>
+      <span class="dot ${options.hasPassword ? 'ok' : 'off'}"></span>
+    </div>
+    <div class="row">
+      <div class="meta">
+        <span class="name">Paired devices</span>
+        <span class="sub">${String(options.deviceCount)} ${options.deviceCount === 1 ? 'device' : 'devices'}</span>
+      </div>
+      <a class="btn outline sm" href="/relay/devices">Manage</a>
+    </div>
+  </div>
+  ${pin}
+  ${connectForm}
+  <h2>Linked computers</h2>
+  <div class="rows">${linked}</div>
+  <div class="actions">
+    <a class="btn outline" href="/relay/pair">Pair a device</a>
+    <a class="btn outline" href="/relay/password">${options.hasPassword ? 'Change the password' : 'Set a password'}</a>
+  </div>
+  <div class="actions">
+    <a class="btn ghost" href="/">Back to the harness</a>
+  </div>
+  <p class="caption">Opening a linked computer leaves this relay and shows its harness on its own address; the browser may warn once about its self-signed certificate. Unlinking on either computer ends the pair's calls.</p>`,
+  })
+}
+
+/**
+ * The last step of the open handoff: the session cookie is already set, and a
+ * same-origin refresh carries it to the harness. A cross-site redirect would
+ * not, because the cookie is SameSite=Strict.
+ * @param peerName - the computer that was opened.
+ * @returns the full HTML document.
+ */
+export function handoffPage(peerName: string): string {
+  return page({
+    title: 'Opening',
+    refresh: '/',
+    body: `
+  <h1>Opening ${escapeHtml(peerName)}</h1>
+  <p>Signed in to the other computer's relay. If the page does not move on its own, use the button below.</p>
+  <div class="actions">
+    <a class="btn primary" href="/">Open the harness</a>
+  </div>
+  <p class="caption">This handoff link works once. Opening it again asks for a new one.</p>`,
   })
 }
 

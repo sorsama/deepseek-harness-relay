@@ -59,6 +59,17 @@ export function mintDeviceId(): string {
 }
 
 /**
+ * Mint the id both sides of a computer link record.
+ *
+ * Hex rather than base64url so it survives a log line, a copy-paste, and the
+ * page footer untouched.
+ * @returns a short opaque link id.
+ */
+export function mintLinkId(): string {
+  return randomBytes(DEVICE_ID_BYTES).toString('hex')
+}
+
+/**
  * Hash a bearer token for storage and for the in-memory lookup index.
  * @param signingKey - the relay's current signing key.
  * @param token - the bearer token as presented.

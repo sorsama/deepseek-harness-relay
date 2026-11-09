@@ -160,6 +160,7 @@ button, input, select, textarea { font-family: inherit; }
 .brand .wordmark { font-size: 16px; line-height: 24px; font-weight: 600; letter-spacing: 0.08em; }
 
 h1 { margin: 0; font-size: 20px; line-height: 28px; font-weight: 500; }
+h2 { margin: 0; font-size: 16px; line-height: 24px; font-weight: 500; }
 p { margin: 0; font-size: 14px; line-height: 22px; color: var(--dsw-alias-label-secondary); }
 .caption { font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-tertiary); }
 code, .mono { font-family: var(--ds-font-family-code); font-size: 13px; line-height: 20px; }
@@ -167,7 +168,7 @@ code, .mono { font-family: var(--ds-font-family-code); font-size: 13px; line-hei
 form { display: flex; flex-direction: column; gap: 12px; }
 label { font-size: 13px; line-height: 20px; font-weight: 500; }
 
-input[type="text"], input[type="password"] {
+input[type="text"], input[type="password"], input[type="url"] {
   height: 36px;
   box-sizing: border-box;
   width: 100%;
@@ -181,7 +182,22 @@ input[type="text"], input[type="password"] {
   outline: none;
   transition: border-color var(--ds-transition-duration) var(--ds-ease-in-out);
 }
-input:focus-visible { border-color: var(--dsw-alias-state-business-primary); }
+select {
+  height: 36px;
+  box-sizing: border-box;
+  width: 100%;
+  padding: 0 12px;
+  border-radius: 12px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  background: var(--dsw-specific-login-input);
+  color: var(--dsw-alias-label-primary);
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 22px;
+  outline: none;
+  transition: border-color var(--ds-transition-duration) var(--ds-ease-in-out);
+}
+input:focus-visible, select:focus-visible { border-color: var(--dsw-alias-state-business-primary); }
 
 /* The capsule from the harness's Button primitive: h36, pad 0/14, gap 4, r18,
    with the compact form at h28/r14. The .btn class carries the same geometry

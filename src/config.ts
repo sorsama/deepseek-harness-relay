@@ -99,6 +99,16 @@ export interface Config {
    * regardless of this setting.
    */
   privilegedMethods: PrivilegedPolicy
+  /**
+   * Whether this relay may link with another relay as a computer.
+   *
+   * On, the Computers page can share this PC by pairing code and connect this
+   * PC to another one. Off, `/relay/link` and the peer endpoints answer 404,
+   * and the Computers page explains why instead of offering the form.
+   */
+  peersEnabled: boolean
+  /** Deadline for one call to a linked computer, in milliseconds. */
+  peerTimeoutMs: number
   /** Path prefixes proxied beyond the built-in set; each must start with `/`. */
   extraProxyPaths: string[]
   /** Upstream response deadline for a proxied request. */
@@ -164,6 +174,8 @@ export interface ConfigSchema {
   lockoutMs: Volatile<number>
   rateLimitPerMinute: Volatile<number>
   privilegedMethods: Volatile<PrivilegedPolicy>
+  peersEnabled: Volatile<boolean>
+  peerTimeoutMs: Volatile<number>
   extraProxyPaths: Volatile<string[]>
   proxyTimeoutMs: Volatile<number>
   compat: CompatSchema['compat']
@@ -241,6 +253,12 @@ export const Config = z.object({
   privilegedMethods: z.union(['allow-authenticated', 'loopback-only'] as const).default('allow-authenticated')
     .description('Whether an authenticated remote client reaches the harness configuration plane.')
     .volatile(),
+  peersEnabled: z.boolean().default(true)
+    .description('Allow linking with another PC as a computer, in either direction.')
+    .volatile(),
+  peerTimeoutMs: z.natural().min(500).default(2000)
+    .description('Deadline for one call to a linked computer, in milliseconds.')
+    .volatile(),
   extraProxyPaths: z.array(String).default([])
     .description('Path prefixes proxied beyond the built-in set; each must start with "/".')
     .volatile(),
@@ -304,6 +322,8 @@ export function plainConfig(config: ConfigSchema): Config {
     lockoutMs: config.lockoutMs.get(),
     rateLimitPerMinute: config.rateLimitPerMinute.get(),
     privilegedMethods: config.privilegedMethods.get(),
+    peersEnabled: config.peersEnabled.get(),
+    peerTimeoutMs: config.peerTimeoutMs.get(),
     extraProxyPaths: [...config.extraProxyPaths.get()],
     proxyTimeoutMs: config.proxyTimeoutMs.get(),
     compat: {

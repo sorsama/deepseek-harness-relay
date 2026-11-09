@@ -125,6 +125,28 @@ On the very first start, the relay often loads before the harness has written th
 
 If you still get 401s after that line, something other than the relay is answering. Check that nothing is proxying straight to the harness's own port.
 
+## Linking another PC
+
+### Connect says the code is not valid
+
+The code comes from the other computer's **Pair a device** page, works once, and expires after five minutes. Reload that page there and use the code it shows now.
+
+### Connect says the certificate does not match the pin
+
+The pin is optional, but if you typed one it must be copied exactly from the other computer's pairing page: 44 characters ending in `=`. Leave it empty to accept the certificate the other computer presents first. If a linked computer later changes its certificate, the link stops; unlink it and link again.
+
+### A linked computer shows "not answering"
+
+The Computers page probes each link while it renders. The other computer's relay port being firewalled, its address changing, or its VPN being down all show as "not answering". Open its relay in this browser first, then reload the Computers page.
+
+### Open warns about the certificate, or seems to do nothing
+
+The first visit to a linked computer's self-signed certificate needs one exception in the browser for that address. After that, the handoff signs this browser in and returns to that computer's harness. If **Open** is disabled, the computer is not answering; see above.
+
+### Linking is refused everywhere
+
+Turn on **Link with other computers** under **Plugins → dsh-relay → Configure** on both computers. Linking is also refused when either relay serves plain HTTP, or when the claiming relay is reached on loopback: use its network address.
+
 ## DSH Mobile
 
 ### "the harness rejected this address"

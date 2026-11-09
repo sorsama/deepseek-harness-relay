@@ -16,12 +16,21 @@
 
 import type { IncomingHttpHeaders } from 'node:http'
 import type { Config } from '../config.ts'
-import type { DeviceRecord, RelayStore } from '../state.ts'
+import type { DeviceRecord, PeerRecord, RelayStore } from '../state.ts'
 import { isGrantableAddress } from '../fence.ts'
 import { hashPassword, verifyPassword } from './password.ts'
 import { PairingWindow } from './pairing.ts'
 import { Throttle } from './ratelimit.ts'
-import { hashToken, mintDeviceId, mintToken, readBearer, readCookie, signSession, verifySession } from './tokens.ts'
+import {
+  hashToken,
+  mintDeviceId,
+  mintLinkId,
+  mintToken,
+  readBearer,
+  readCookie,
+  signSession,
+  verifySession,
+} from './tokens.ts'
 
 /** Name of the signed sign-in cookie. */
 export const SESSION_COOKIE = 'dsh_relay_session'
@@ -94,6 +103,8 @@ export interface SignInSuccess {
 export class Authenticator {
   /** token hash → device id, rebuilt from the store on construction and on every mutation. */
   #tokenIndex = new Map<string, string>()
+  /** token hash → peer id, for tokens another relay presents to this one. */
+  #peerIndex = new Map<string, string>()
   readonly #throttle: Throttle
   readonly pairing = new PairingWindow()
 
@@ -110,7 +121,7 @@ export class Authenticator {
     this.#reindex()
   }
 
-  /** Rebuild the token lookup index from durable state. */
+  /** Rebuild the token lookup indexes from durable state. */
   #reindex(): void {
     const index = new Map<string, string>()
     for (const device of Object.values(this.store.state.devices)) {
@@ -118,6 +129,11 @@ export class Authenticator {
       index.set(device.tokenHash, device.id)
     }
     this.#tokenIndex = index
+    const peers = new Map<string, string>()
+    for (const peer of Object.values(this.store.state.peers)) {
+      peers.set(peer.inboundTokenHash, peer.id)
+    }
+    this.#peerIndex = peers
   }
 
   /** Whether a password has been set at all. */
@@ -130,6 +146,36 @@ export class Authenticator {
     return Object.values(this.store.state.devices)
       .filter(device => device.revokedAt === undefined)
       .toSorted((a, b) => b.createdAt - a.createdAt)
+  }
+
+  /** Linked computers, newest first. */
+  get peers(): PeerRecord[] {
+    return Object.values(this.store.state.peers)
+      .toSorted((a, b) => b.createdAt - a.createdAt)
+  }
+
+  /**
+   * Resolve a bearer token to a linked computer.
+   *
+   * This is a link-scoped credential, not a harness credential: it is accepted
+   * only by the peer endpoints, never by the proxy or the operator routes.
+   * @param token - the token as presented.
+   * @returns the peer, or undefined when the token is unknown or the link is gone.
+   */
+  peerForToken(token: string): PeerRecord | undefined {
+    const peerId = this.#peerIndex.get(hashToken(this.store.state.signingKey, token))
+    if (peerId === undefined) return undefined
+    return this.store.state.peers[peerId]
+  }
+
+  /**
+   * Resolve the linked computer behind an `Authorization: Bearer` header.
+   * @param headers - the inbound request headers.
+   * @returns the peer, or undefined when no valid link token was presented.
+   */
+  identifyPeer(headers: AuthRequest['headers']): PeerRecord | undefined {
+    const token = readBearer(headers.authorization)
+    return token === undefined ? undefined : this.peerForToken(token)
   }
 
   /**
@@ -253,6 +299,24 @@ export class Authenticator {
   }
 
   /**
+   * Mint a browser session without a password.
+   *
+   * Only the cross-PC open handoff calls this, after the request proved it is
+   * a linked computer presenting its link token. The result is the same
+   * password-subject session a sign-in would produce, so the harness and the
+   * relay treat it identically from then on.
+   * @param now - current epoch millis.
+   * @returns the cookie to set and when it expires.
+   */
+  sessionGrant(now: number): SignInSuccess {
+    const expiresAt = now + this.config.sessionTtlMs
+    return {
+      cookie: signSession(this.store.state.signingKey, { subject: 'password', issuedAt: now, expiresAt }),
+      expiresAt,
+    }
+  }
+
+  /**
    * Enrol a device against the outstanding pairing code.
    * @param options.code - the code as presented.
    * @param options.name - the device label to record.
@@ -301,6 +365,117 @@ export class Authenticator {
     })
     this.#reindex()
     return { token, device }
+  }
+
+  /**
+   * Accept a computer link claimed with the outstanding pairing code.
+   *
+   * The caller is another relay's operator, holding a code this machine issued.
+   * It hands over the token it will accept calls on (`callbackToken`); this
+   * relay mints the token the peer presents here and returns it. Success
+   * consumes the code, exactly like device pairing.
+   * @param options.code - the code as presented.
+   * @param options.name - the peer's label.
+   * @param options.url - the peer's reachable origin, already validated as https.
+   * @param options.fingerprint - the peer's certificate pin, already validated.
+   * @param options.callbackToken - token this relay will present to the peer.
+   * @param options.address - normalized source address, for the lockout counter.
+   * @param now - current epoch millis.
+   * @returns the recorded peer and the token its operator must keep, or the reason it failed.
+   */
+  async pairComputer(options: {
+    readonly code: string
+    readonly name: string
+    readonly url: string
+    readonly fingerprint: string
+    readonly callbackToken: string
+    readonly address: string
+  }, now: number): Promise<{ readonly peer: PeerRecord, readonly token: string } | 'locked-out' | undefined> {
+    if (this.#throttle.lockedUntil(options.address, now) !== undefined) return 'locked-out'
+    if (!this.pairing.claim(options.code, now)) {
+      this.#throttle.recordFailure(options.address, now)
+      return undefined
+    }
+    this.#throttle.recordSuccess(options.address)
+    const inboundToken = mintToken()
+    const peer: PeerRecord = {
+      id: mintDeviceId(),
+      linkId: mintLinkId(),
+      name: options.name.slice(0, 64) || 'PC',
+      url: options.url,
+      fingerprint: options.fingerprint,
+      inboundTokenHash: hashToken(this.store.state.signingKey, inboundToken),
+      outboundToken: options.callbackToken,
+      createdAt: now,
+      lastAddress: options.address,
+    }
+    await this.store.update((draft) => { draft.peers[peer.id] = peer })
+    this.#reindex()
+    return { peer, token: inboundToken }
+  }
+
+  /**
+   * Record a link this relay initiated, after the peer accepted it.
+   * @param input - names and tokens already exchanged with the peer.
+   * @param now - current epoch millis.
+   * @returns the recorded peer.
+   */
+  async recordPeer(input: {
+    readonly name: string
+    readonly url: string
+    readonly fingerprint: string
+    readonly linkId: string
+    readonly inboundToken: string
+    readonly outboundToken: string
+    readonly address: string
+  }, now: number): Promise<PeerRecord> {
+    const peer: PeerRecord = {
+      id: mintDeviceId(),
+      linkId: input.linkId,
+      name: input.name.slice(0, 64) || 'PC',
+      url: input.url,
+      fingerprint: input.fingerprint,
+      inboundTokenHash: hashToken(this.store.state.signingKey, input.inboundToken),
+      outboundToken: input.outboundToken,
+      createdAt: now,
+      lastAddress: input.address,
+    }
+    await this.store.update((draft) => { draft.peers[peer.id] = peer })
+    this.#reindex()
+    return peer
+  }
+
+  /**
+   * Drop one link, on this side only. The peer learns on its next call, which
+   * stops authenticating, and shows the link as gone.
+   * @param peerId - the peer to unlink.
+   * @returns true when a link was removed.
+   */
+  async removePeer(peerId: string): Promise<boolean> {
+    if (this.store.state.peers[peerId] === undefined) return false
+    await this.store.update((draft) => { delete draft.peers[peerId] })
+    this.#reindex()
+    return true
+  }
+
+  /**
+   * Record that a peer was reachable, from either direction.
+   * @param peerId - the peer.
+   * @param address - source address of its call, when it called this relay.
+   * @param now - current epoch millis.
+   * @returns resolution once the record is durable.
+   */
+  async touchPeer(peerId: string, address: string | undefined, now: number): Promise<void> {
+    const peer = this.store.state.peers[peerId]
+    if (peer === undefined) return
+    const fresh = (peer.lastSeenAt ?? 0) > now - 60_000 && (address === undefined || peer.lastAddress === address)
+    if (fresh) return
+    await this.store.update((draft) => {
+      const record = draft.peers[peerId]
+      if (record === undefined) return
+      record.lastSeenAt = now
+      if (address !== undefined) record.lastAddress = address
+    })
   }
 
   /**
@@ -364,6 +539,10 @@ export class Authenticator {
       draft.signingKey = randomBytes(32).toString('base64url')
       draft.devices = {}
       draft.grants = {}
+      // Peer tokens are keyed by the same signing key, so they can never match
+      // again; the links themselves are dropped too, because a half-dead link
+      // that still shows a row and an Open button is worse than none.
+      draft.peers = {}
     })
     this.#reindex()
     this.pairing.clear()

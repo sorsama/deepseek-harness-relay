@@ -24,6 +24,7 @@ Everything you need from a phone lives on the relay's own pages instead. They wo
 |---|---|
 | `/relay/devices` | Paired devices with revoke buttons, relay status, the certificate pin, and "sign out everywhere" |
 | `/relay/pair` | The QR code and passcode for adding a device |
+| `/relay/computers` | Link another PC, open a linked computer's harness, and unlink |
 | `/relay/password` | Setting or changing the password |
 | `/relay/health` | A health check that needs no sign-in |
 
@@ -94,6 +95,8 @@ Changes to this file apply without a restart. Installing or removing the plugin 
 | `rateLimitPerMinute` | `600` | Requests allowed per minute from one address. |
 | `privilegedMethods` | `allow-authenticated` | Whether a signed-in remote device can reach harness settings, credentials, model discovery, and the host's folder pickers. Set `loopback-only` to keep those on the harness machine. Devices let in by address never reach them. On harness 0.1.2 and later this setting is the only thing guarding them, because the harness no longer restricts them itself. |
 | `extraProxyPaths` | `[]` | More path prefixes (each starting with `/`) that a write request may go to. |
+| `peersEnabled` | `true` | Allow linking this relay with another PC: share this one, or connect to another and open its harness here. Both computers need this on. |
+| `peerTimeoutMs` | 2 seconds | How long one call to a linked computer may take before the Computers page shows it as not answering. |
 | `proxyTimeoutMs` | 2 minutes | How long to wait for the harness to answer a request. |
 | `compat.addressGrants` | `true` | The bridge for DSH Mobile 0.5.0 to 0.7.0, which lets a device in by its network address. |
 | `compat.addressGrantTtlMs` | 1 day | How long an address stays trusted. |

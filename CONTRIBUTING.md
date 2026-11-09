@@ -77,7 +77,7 @@ The settings page on harness 0.1.7 and later fails silently in two ways. If the 
 
 1. Bump `version` in `package.json`, add a `CHANGELOG.md` entry, and merge.
 2. Tag the merge commit (`git tag -a vX.Y.Z -m "Release X.Y.Z: …"`) and push the tag.
-3. Publish a GitHub release for the tag. `.github/workflows/publish.yml` then checks, builds, and publishes to npm through trusted publishing, so no npm token or login is needed. A prerelease version goes to the `next` tag.
+3. Publish a GitHub release for the tag, titled with the version alone (`0.4.0`), with the notes in the body. `.github/workflows/publish.yml` then checks, builds, and publishes to npm through trusted publishing, so no npm token or login is needed. A prerelease version goes to the `next` tag.
 
 ## Security
 

@@ -45,6 +45,7 @@ Any harness plugin can register its own RPC channel, and several of them are mea
 - **A weak password.** The minimum is 10 characters. Treat that as the lowest you can go, not a target.
 - **A compromised harness machine.** The relay treats loopback as you, because anyone already on that machine has everything the relay protects.
 - **Plain HTTP, if you turn it on.** `tls: off` and the plain compatibility listener send credentials and traffic unencrypted. Anything on the network path can read them.
+- **A computer you decided to link.** Opening a linked computer hands your browser the same session a password sign-in on that machine would. The trust boundary is the person who owns each end deciding to link it.
 - **A shared or spoofed network address.** See the next section.
 
 ## Address grants
@@ -83,6 +84,18 @@ The exact list is in [`src/privileged.ts`](../src/privileged.ts). It includes th
 Up to harness 0.1.1, the harness kept these endpoints to loopback itself, and the relay copied that list so its `Host` rewrite couldn't undo the restriction. Harness 0.1.2 removed that list: anyone with a session can now reach the whole API. The relay's list is now its own policy, and it's the only thing between a paired phone and your credential store.
 
 `privilegedMethods: allow-authenticated` (the default) lets anyone signed in with a password or device token reach these endpoints. `loopback-only` keeps them on the harness machine. Devices let in by address grant never reach them.
+
+## Linked computers
+
+A computer link is two relays that know each other by one token in each direction and pin each other's certificate.
+
+- **How it starts.** One side issues the ordinary pairing code: single-use, five minutes, created only by that machine's operator. The other side claims it with its own address, its certificate pin, and a token it will accept calls on. The claiming request travels over TLS, and the claimant verifies the other side's pin before it sends anything. Both sides write the link, which is what makes the pair appear on both Computers pages.
+- **What each side holds.** A token to call the other, a hashed token the other calls with, and the other's SPKI pin. Every call checks the token and the pin; a certificate that changes under a link is refused rather than trusted with the new key.
+- **What Open grants.** The opening side asks the other, over the pinned link, for a one-time nonce good for 60 seconds. The browser follows to that computer's `/relay/peer/enter`, which spends the nonce and sets an ordinary browser session cookie. No password crosses the link, and the nonce works exactly once. A cross-site link cannot mint one; only a linked computer holding its token can.
+- **What a link token cannot do.** It authenticates only `/relay/peer/status` and `/relay/peer/open`. It is not a device token: the harness proxy, the operator pages, and the WebSocket downlinks all refuse it.
+- **Plain HTTP.** No link, token, or handoff is offered on plain HTTP. Both relays must serve TLS, and a relay that answers on loopback is refused as a link origin.
+- **Ending it.** Unlink on either side. The other side's next call stops authenticating and its page shows the link as gone. **Sign out everywhere** rotates the signing key and drops every link with every session and device.
+- **The other computer's operator** is not restricted by this relay: opening a linked computer gives your browser the same authority a password sign-in there would. Link computers you own or trust.
 
 ## Reporting a vulnerability
 

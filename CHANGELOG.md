@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.4.0 — 2026-11-09
+
+### Added
+
+- **Remote PC to PC.** A second harness computer can now be linked from the new
+  **Computers** page, in either direction. **Share this PC** was the relay's
+  only role; **Connect to another PC** records a mutual link, so both Computers
+  pages list the pair, and **Open** hands this browser a single-use session on
+  the other computer without retyping its password. Each link carries one token
+  per direction and pins the other computer's certificate; every later call is
+  checked against both. Linking needs TLS on both sides and is refused on plain
+  HTTP.
+- The link's handoff is a single-use nonce, good for 60 seconds, and it sets an
+  ordinary browser session on the other computer. A link token reaches only
+  `/relay/peer/status` and `/relay/peer/open`; the harness proxy, the operator
+  pages, and both WebSocket downlinks refuse it.
+- `peersEnabled` (default `true`) and `peerTimeoutMs` (default `2000`) settings,
+  on the settings page. Turning linking off answers 404 on the link endpoints
+  and leaves the Computers page explaining why.
+- **Sign out everywhere now drops computer links too**, along with every session
+  and device token. Unlink on either side ends the pair; the other side's next
+  call stops authenticating.
+
+### Changed
+
+- `state.json` is now version 2. A version 1 file is upgraded in place on the
+  first start, keeping its paired devices, address grants, and certificate, so
+  no phone has to pair again.
+
 ## 0.3.5 — 2026-11-09
 
 ### Fixed

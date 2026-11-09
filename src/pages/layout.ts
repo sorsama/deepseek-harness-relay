@@ -43,9 +43,20 @@ const MARK = `<svg width="22" height="22" viewBox="0 0 22 22" fill="none" aria-h
  * @param options.title - the document title.
  * @param options.body - already-escaped markup for the card's contents.
  * @param options.wide - render the wider card used by the admin page.
+ * @param options.refresh - same-origin path to move to immediately, for the
+ *   open handoff: a same-origin refresh is what sends the freshly set Strict
+ *   cookie on the next request, where a cross-site redirect would not.
  * @returns the full HTML document.
  */
-export function page(options: { title: string, body: string, wide?: boolean }): string {
+export function page(options: {
+  readonly title: string
+  readonly body: string
+  readonly wide?: boolean
+  readonly refresh?: string | undefined
+}): string {
+  const refresh = options.refresh === undefined
+    ? ''
+    : `<meta http-equiv="refresh" content="0; url=${escapeHtml(options.refresh)}">`
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -53,6 +64,7 @@ export function page(options: { title: string, body: string, wide?: boolean }): 
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="robots" content="noindex, nofollow">
 <meta name="color-scheme" content="light dark">
+${refresh}
 <title>${escapeHtml(options.title)}</title>
 <style>${THEME_CSS}</style>
 </head>

@@ -70,11 +70,17 @@ const FIELDS: readonly Field[] = [
     hint: 'Requests allowed per minute from one source address, across every path.',
     numeric: true,
   },
+  {
+    field: 'peerTimeoutMs',
+    label: 'Linked computer timeout (ms)',
+    hint: 'How long one call to a linked computer may take before the page shows it as not answering.',
+    numeric: true,
+  },
 ]
 
 /** One switch the page offers, as a segmented control over a staged field. */
 interface Choice {
-  readonly field: 'privilegedMethods' | 'uiLink' | 'mdns'
+  readonly field: 'privilegedMethods' | 'uiLink' | 'mdns' | 'peersEnabled'
   /** What the field resolves to when the section carries no value of its own. */
   readonly fallback: string
   readonly label: string
@@ -108,6 +114,13 @@ const CHOICES: readonly Choice[] = [
     hint: 'Publishes _dsh._tcp so a client can find this relay without scanning the subnet.',
     options: [{ value: 'true', label: 'Announced' }, { value: 'false', label: 'Quiet' }],
   },
+  {
+    field: 'peersEnabled',
+    fallback: 'true',
+    label: 'Link with other computers',
+    hint: 'Lets this relay share this PC and connect to another PC from its Computers page. Both sides need this on.',
+    options: [{ value: 'true', label: 'Allowed' }, { value: 'false', label: 'Off' }],
+  },
 ]
 
 /** The relay configuration this card reads. */
@@ -118,6 +131,8 @@ export interface RelayValue {
   readonly privilegedMethods?: string
   readonly uiLink?: boolean
   readonly mdns?: boolean
+  readonly peersEnabled?: boolean
+  readonly peerTimeoutMs?: number
   readonly compat?: { readonly addressGrants?: boolean, readonly plainPort?: number }
 }
 
@@ -145,9 +160,11 @@ export interface RelayCardState extends Shell {
   readonly port: FieldState
   readonly proxyTimeoutMs: FieldState
   readonly rateLimitPerMinute: FieldState
+  readonly peerTimeoutMs: FieldState
   readonly privilegedMethods: FieldState
   readonly uiLink: FieldState
   readonly mdns: FieldState
+  readonly peersEnabled: FieldState
 }
 
 /** Props the renderer composes for this card. */
@@ -280,6 +297,7 @@ export function RelayCard(props: RelayCardProps) {
       <div className={css.actions}>
         <a className={css.action} href="/relay/pair">Pair a device</a>
         <a className={css.action} href="/relay/devices">Paired devices</a>
+        <a className={css.action} href="/relay/computers">Computers</a>
         <a className={css.action} href="/relay/password">Change the password</a>
       </div>
 

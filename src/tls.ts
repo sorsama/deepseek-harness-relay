@@ -63,7 +63,7 @@ interface SelfSigned {
  * @param certPem - the certificate, PEM encoded.
  * @returns the base64 digest.
  */
-export function spkiFingerprint(certPem: string): string {
+export function spkiFingerprint(certPem: string | Buffer): string {
   const spki = new X509Certificate(certPem).publicKey.export({ type: 'spki', format: 'der' })
   return createHash('sha256').update(spki).digest('base64')
 }
