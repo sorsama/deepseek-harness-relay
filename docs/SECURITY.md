@@ -28,6 +28,8 @@ A forwarding header is a hint, though, and a proxy can strip it. A proxy that do
 
 You can revoke each device on its own. "Sign out everywhere" rotates the signing key, which invalidates every browser session and every device token at once.
 
+Revoking also closes what the credential already has open. A revoked device's WebSockets (its own and its WebView's) are closed at once, and "Sign out everywhere" closes every remote one, so a stream opened before you noticed doesn't keep running. Your own connections from the harness machine are left alone.
+
 ### Password guessing
 
 Sign-in and pairing attempts are counted per source address, and too many failures lock that address out. Every request is also rate limited per address.
@@ -84,6 +86,33 @@ The exact list is in [`src/privileged.ts`](../src/privileged.ts). It includes th
 Up to harness 0.1.1, the harness kept these endpoints to loopback itself, and the relay copied that list so its `Host` rewrite couldn't undo the restriction. Harness 0.1.2 removed that list: anyone with a session can now reach the whole API. The relay's list is now its own policy, and it's the only thing between a paired phone and your credential store.
 
 `privilegedMethods: allow-authenticated` (the default) lets anyone signed in with a password or device token reach these endpoints. `loopback-only` keeps them on the harness machine. Devices let in by address grant never reach them.
+
+### The one exception: `ui-sync`
+
+Under `loopback-only`, a signed-in browser, a paired device, and a device's WebView can still read and write one settings namespace, `ui-sync`. It belongs to the `dsh-ui-sync` companion and holds one thing: where each web plugin item shows (phone, desktop, both, or off). It holds no secret, and it doesn't change what the agent can do. Writing it can hide or show a third-party plugin's button on one screen or the other; the harness's own items aren't gated on the desktop.
+
+The exception is narrow on purpose:
+
+- **Two calls only.** `settings/describe` and `settings/mutate`. `settings/update`, `settings/replace`, the settings document, and everything else on the list stay on the harness machine.
+- **Describe is filtered, not trusted.** `settings/describe` takes no namespace and answers all of them, with values and schemas. The relay forwards it with empty arguments, parses the answer, and removes every namespace except `ui-sync` before it leaves. An answer the relay can't parse (not JSON, compressed, multipart, or not shaped like a settings answer) is refused with a 502 rather than passed through.
+- **Mutate is judged by its payload.** The path says only `settings/mutate`; the namespace is in the body. The relay parses the body, refuses any namespace but exactly `ui-sync` (or any argument it doesn't recognize), and forwards a request it rebuilt from the fields it checked. Forwarding the client's own bytes would leave room for the harness to read them differently, through a duplicate key for example. Rebuilt, the harness sees exactly what was judged.
+- **The name is fixed in code.** It isn't a setting, so a typo in the configuration can't widen it to `relay` or a credential namespace.
+- **Address grants are still out.** A source address isn't authentication, so it reaches no settings call at all.
+
+These two calls are unary, which the harness serves only over `POST /api/<namespace>/<method>`. It refuses to open a unary method over its WebSocket stream carrier, so the path the relay checks is the only one they can take.
+
+## WebView sessions for paired devices
+
+A paired app can show the harness web UI in a WebView, for example to run desktop web plugins on the phone. A WebView can't attach the app's bearer token to the requests its page makes, so the relay hands it a cookie instead. The handoff is built so that the cookie is never worth more than the token, and the token never appears in a URL.
+
+- **How it starts.** The app calls `POST /relay/session/open` with its bearer token over its own connection. The relay answers a code: 24 random bytes, good once, for 60 seconds, for that device only. The WebView loads `/relay/session/enter?code=…`; the relay spends the code, sets the cookie, and redirects into the harness with `Referrer-Policy: no-referrer`.
+- **What the code is worth.** Nothing after one use or one minute, and nothing once its device is unpaired. It is the only secret that ever appears in a URL, which is why it's built to be worthless after that one navigation. A code is held in memory only, so restarting the harness drops every outstanding one.
+- **What the cookie is.** `dsh_relay_device`, `HttpOnly`, `SameSite=Strict`, `Path=/`, and `Secure` whenever the relay serves TLS. It lasts no longer than a sign-in (`sessionTtlMs`, 12 hours by default) and never past the device token's own expiry.
+- **What it can do.** Exactly what the device's token can do: the harness, its API, and both WebSocket downlinks, with `privilegedMethods` applied the same way. It is not the operator. The pairing, device, computer, and sign-out pages refuse it.
+- **What it can't do.** It can't mint another code, so a cookie lifted out of a WebView can't renew itself; only the bearer token can. The plain compatibility listener refuses it. It's a different cookie from the sign-in one, and each name accepts only its own kind, so moving a device cookie's value under the sign-in name gets nothing.
+- **Ending it.** Revoking the device ends the cookie on its next request and closes the WebSockets the WebView has open. **Sign out everywhere** ends every one of them.
+- **Plain HTTP.** With `tls: off` the handoff still works, but the cookie isn't `Secure` and travels unencrypted, like the token itself does on that listener. That's the same call you made when you turned TLS off.
+- **What it doesn't change.** Plugin code in that WebView runs with the same authority it has in a desktop browser signed in to the relay. Keep the WebView on the relay's origin; DSH Mobile does.
 
 ## Linked computers
 

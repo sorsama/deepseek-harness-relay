@@ -93,7 +93,7 @@ Changes to this file apply without a restart. Installing or removing the plugin 
 | `pairingCodeLength` | `8` | Digits in a pairing code, from 6 to 12. |
 | `maxFailedAttempts` / `lockoutMs` | 5 / 15 minutes | Wrong guesses allowed from one address, and how long it's locked out after that. |
 | `rateLimitPerMinute` | `600` | Requests allowed per minute from one address. |
-| `privilegedMethods` | `allow-authenticated` | Whether a signed-in remote device can reach harness settings, credentials, model discovery, and the host's folder pickers. Set `loopback-only` to keep those on the harness machine. Devices let in by address never reach them. On harness 0.1.2 and later this setting is the only thing guarding them, because the harness no longer restricts them itself. |
+| `privilegedMethods` | `allow-authenticated` | Whether a signed-in remote device can reach harness settings, credentials, model discovery, and the host's folder pickers. Set `loopback-only` to keep those on the harness machine; the one exception is the `ui-sync` plugin-targets namespace, which signed-in devices can still read and write ([why](SECURITY.md#the-one-exception-ui-sync)). Devices let in by address never reach them. On harness 0.1.2 and later this setting is the only thing guarding them, because the harness no longer restricts them itself. |
 | `extraProxyPaths` | `[]` | More path prefixes (each starting with `/`) that a write request may go to. |
 | `peersEnabled` | `true` | Allow linking this relay with another PC: share this one, or connect to another and open its harness here. Both computers need this on. |
 | `peerTimeoutMs` | 2 seconds | How long one call to a linked computer may take before the Computers page shows it as not answering. |

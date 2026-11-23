@@ -85,6 +85,7 @@ Harness 0.1.2 and later have a sign-in of their own (a browser session cookie). 
 - HTTPS, with your own certificate or a self-signed one whose key apps can pin.
 - mDNS advertisement on `_dsh._tcp`, so apps can find the relay without scanning your subnet.
 - The full harness web UI, unchanged, with a small **Relay** link in the corner when the page is served through the relay.
+- A one-time handoff that lets a paired app open that web UI in a WebView, with a cookie that carries the device's access and nothing more, and ends when you unpair the device.
 - A **Relay** action at the sidebar foot, one click from the account menu, that changes the app to the relay's pairing, device, and password pages — in place, in the same window.
 - A **Computers** page that links this relay with another PC in either direction: share this PC, or connect to another one and open its harness in this browser with one click.
 - A settings page at **Plugins → dsh-relay → Configure** on the machine running the harness. Changes apply when you press Save, with no restart.
