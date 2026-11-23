@@ -264,7 +264,9 @@ async function serve(
 
   if (isPinnedMethod(url.pathname, identity.privileged)) {
     const scoped = scopedSettingsMethod(url.pathname)
-    if (scoped !== undefined && reachesScopedSettings(identity)) {
+    // `uiSyncSettings: false` drops the exception, so the pinned set is
+    // exactly the pre-0.5.0 one.
+    if (scoped !== undefined && runtime.config.uiSyncSettings && reachesScopedSettings(identity)) {
       if (identity.deviceId !== undefined) {
         void runtime.auth.touch(identity.deviceId, address, now)
       }

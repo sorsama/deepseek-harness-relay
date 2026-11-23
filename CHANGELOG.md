@@ -25,6 +25,11 @@
   its payload and forwarded rebuilt from the checked fields. Every other
   settings call, credentials, model discovery, the host pickers, and agent
   presets stay on the harness machine. Address grants still reach none of it.
+- **`uiSyncSettings`** (default `true`) turns that exception off. With
+  `uiSyncSettings: false`, `settings/describe` and `settings/mutate` are
+  pinned under `loopback-only` exactly as in 0.4.0, so a remote client
+  reaches no settings call at all. It is also on the relay's settings page as
+  **Phone add-on placement**. It has no effect under `allow-authenticated`.
 - An embedding page can hide the corner **Relay** link by setting
   `data-dsh-relay-badge="off"` on its `<html>` element.
 

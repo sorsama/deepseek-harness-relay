@@ -161,11 +161,13 @@ describe('the browser half', () => {
     face.edit('uiLink', 'false')
     face.edit('mdns', 'false')
     face.edit('privilegedMethods', 'loopback-only')
+    face.edit('uiSyncSettings', 'false')
     face.edit('port', '3450')
     const staged = store.getSnapshot()
     expect(staged.dirty).toBe(true)
     expect((staged.uiLink as { text: string }).text).toBe('false')
     expect((staged.privilegedMethods as { text: string }).text).toBe('loopback-only')
+    expect((staged.uiSyncSettings as { text: string }).text).toBe('false')
 
     face.save()
     await new Promise(resolve => setTimeout(resolve, 0))
@@ -173,6 +175,7 @@ describe('the browser half', () => {
       { op: 'set', path: ['uiLink'], value: false },
       { op: 'set', path: ['mdns'], value: false },
       { op: 'set', path: ['privilegedMethods'], value: 'loopback-only' },
+      { op: 'set', path: ['uiSyncSettings'], value: false },
       { op: 'set', path: ['port'], value: 3450 },
     ]])
   })

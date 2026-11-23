@@ -770,6 +770,78 @@ describe('the ui-sync settings namespace under loopback-only', () => {
   })
 })
 
+describe('the uiSyncSettings owner switch', () => {
+  it('is on unless the operator turns it off', () => {
+    expect(configFor().uiSyncSettings).toBe(true)
+    expect(configFor({ uiSyncSettings: false }).uiSyncSettings).toBe(false)
+  })
+
+  it('on, serves the ui-sync calls to every signed-in credential', async () => {
+    await restartRelay({ uiSyncSettings: true })
+    const { token } = await pairDevice()
+    const cookie = await deviceCookie(token)
+    const signIn = auth.sessionGrant(Date.now())
+    const ops = [{ op: 'set', path: ['targets', 'dsh-pet|shell.overlay|pet'], value: 'both' }]
+    for (const credential of [
+      { authorization: `Bearer ${token}` },
+      { cookie },
+      { cookie: `${SESSION_COOKIE}=${encodeURIComponent(signIn.cookie)}` },
+    ]) {
+      expect((await rpc('settings/describe', envelope('settings/describe', {}), credential)).status).toBe(200)
+      expect((await rpc('settings/mutate', envelope('settings/mutate', { ns: 'ui-sync', ops }), credential)).status).toBe(200)
+    }
+    expect(seenAt('/api/settings/describe')).toHaveLength(3)
+    expect(seenAt('/api/settings/mutate')).toHaveLength(3)
+  })
+
+  it('off, pins both calls exactly like before 0.5.0, and the harness sees nothing', async () => {
+    await restartRelay({ uiSyncSettings: false })
+    const { token } = await pairDevice()
+    const cookie = await deviceCookie(token)
+    const signIn = auth.sessionGrant(Date.now())
+    const ops = [{ op: 'set', path: ['targets', 'dsh-pet|shell.overlay|pet'], value: 'both' }]
+    for (const credential of [
+      { authorization: `Bearer ${token}` },
+      { cookie },
+      { cookie: `${SESSION_COOKIE}=${encodeURIComponent(signIn.cookie)}` },
+    ]) {
+      const described = await rpc('settings/describe', envelope('settings/describe', {}), credential)
+      expect(described.status).toBe(403)
+      // The pinned-method refusal itself, not one of the scoped path's own 403s.
+      expect(JSON.parse(described.text)).toEqual({
+        error: 'forbidden',
+        message: 'this method is served only to the machine running the harness',
+      })
+      const mutate = await rpc('settings/mutate', envelope('settings/mutate', { ns: 'ui-sync', ops }), credential)
+      expect(mutate.status).toBe(403)
+      expect(mutate.text).not.toContain('ui-sync')
+    }
+    expect(received.filter(entry => entry.url.startsWith('/api/settings/'))).toHaveLength(0)
+    // Unpinned calls and the WebView session are untouched by the switch.
+    expect((await rpc('session/list', envelope('session/list', {}), { cookie })).status).toBe(200)
+  })
+
+  it('off, the operator at the machine still reaches settings', async () => {
+    await restartRelay({ uiSyncSettings: false })
+    const answer = await call('/api/settings/describe', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: envelope('settings/describe', {}),
+    })
+    expect(answer.status).toBe(200)
+    // Loopback is forwarded unfiltered, as it always was.
+    expect(answer.text).toContain('"relay"')
+  })
+
+  it('off, changes nothing under allow-authenticated', async () => {
+    await restartRelay({ privilegedMethods: 'allow-authenticated', uiSyncSettings: false })
+    const { token } = await pairDevice()
+    const answer = await rpc('settings/describe', envelope('settings/describe', {}), { authorization: `Bearer ${token}` })
+    expect(answer.status).toBe(200)
+    expect(answer.text).toContain('"llm"')
+  })
+})
+
 describe('the scoped request and answer, on their own', () => {
   it('rebuilds a mutate from the checked fields only', () => {
     const rebuilt = rebuildScopedRequest('settings/mutate', {

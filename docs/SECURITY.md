@@ -89,7 +89,7 @@ Up to harness 0.1.1, the harness kept these endpoints to loopback itself, and th
 
 ### The one exception: `ui-sync`
 
-Under `loopback-only`, a signed-in browser, a paired device, and a device's WebView can still read and write one settings namespace, `ui-sync`. It belongs to the `dsh-ui-sync` companion and holds one thing: where each web plugin item shows (phone, desktop, both, or off). It holds no secret, and it doesn't change what the agent can do. Writing it can hide or show a third-party plugin's button on one screen or the other; the harness's own items aren't gated on the desktop.
+Under `loopback-only`, a signed-in browser, a paired device, and a device's WebView can still read and write one settings namespace, `ui-sync`, unless you set `uiSyncSettings: false`. It belongs to the `dsh-ui-sync` companion and holds one thing: where each web plugin item shows (phone, desktop, both, or off). It holds no secret, and it doesn't change what the agent can do. Writing it can hide or show a third-party plugin's button on one screen or the other; the harness's own items aren't gated on the desktop.
 
 The exception is narrow on purpose:
 
@@ -97,6 +97,7 @@ The exception is narrow on purpose:
 - **Describe is filtered, not trusted.** `settings/describe` takes no namespace and answers all of them, with values and schemas. The relay forwards it with empty arguments, parses the answer, and removes every namespace except `ui-sync` before it leaves. An answer the relay can't parse (not JSON, compressed, multipart, or not shaped like a settings answer) is refused with a 502 rather than passed through.
 - **Mutate is judged by its payload.** The path says only `settings/mutate`; the namespace is in the body. The relay parses the body, refuses any namespace but exactly `ui-sync` (or any argument it doesn't recognize), and forwards a request it rebuilt from the fields it checked. Forwarding the client's own bytes would leave room for the harness to read them differently, through a duplicate key for example. Rebuilt, the harness sees exactly what was judged.
 - **The name is fixed in code.** It isn't a setting, so a typo in the configuration can't widen it to `relay` or a credential namespace.
+- **You can turn it off.** `uiSyncSettings: false` removes the exception, and `settings/describe` and `settings/mutate` are refused with 403 like every other pinned call, exactly as before 0.5.0. The switch can only narrow: it has no effect under `allow-authenticated`, which already serves the whole plane, and it can't name a different namespace. With it off, the phone app can't change where add-ons show; you change that on the harness machine instead.
 - **Address grants are still out.** A source address isn't authentication, so it reaches no settings call at all.
 
 These two calls are unary, which the harness serves only over `POST /api/<namespace>/<method>`. It refuses to open a unary method over its WebSocket stream carrier, so the path the relay checks is the only one they can take.

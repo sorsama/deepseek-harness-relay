@@ -211,7 +211,7 @@ Content-Type: application/json
   "payload": { "args": { "ns": "ui-sync", "ops": [ { "op": "set", "path": ["targets", "<item id>"], "value": "phone" } ] } } }
 ```
 
-Send the bearer token (the app) or the cookie (the WebView page). With `privilegedMethods: allow-authenticated` these are ordinary calls. With `loopback-only` the relay allows exactly these two, for exactly this namespace:
+Send the bearer token (the app) or the cookie (the WebView page). With `privilegedMethods: allow-authenticated` these are ordinary calls. With `loopback-only` the relay allows exactly these two, for exactly this namespace (unless the operator turned it off, [below](#when-the-operator-turns-ui-sync-off)):
 
 - `settings/describe` must have empty `args`. The answer has the harness's usual shape, `{ "type": "server-response", "rpcId", "result": { "ok": true, "value": { "writable", "hasDocument", "namespaces": [...] } } }`, with `namespaces` cut down to the `ui-sync` entry (an empty list when the companion isn't installed).
 - `settings/mutate` must name `"ns": "ui-sync"` exactly, with an `ops` array and optionally a numeric `expectedRevision`. Any other namespace or argument is refused before the harness sees it.
@@ -225,6 +225,10 @@ Send the bearer token (the app) or the cookie (the WebView page). With `privileg
 | 413 | The body was over 256 KiB. |
 | 415 | Not `application/json`, or compressed. |
 | 502 | The harness didn't answer, or answered `settings/describe` in a shape the relay can't filter. The relay never passes an unfiltered answer through. |
+
+### When the operator turns ui-sync off
+
+With `uiSyncSettings: false` and `privilegedMethods: loopback-only`, both calls answer 403 with `{ "error": "forbidden" }` before the harness sees them, the same as any other pinned method. Treat that as "placement is managed on the computer": show the add-ons read-only rather than as an error, and don't retry. The WebView handoff and everything else keep working.
 
 The companion has no item-list call of its own: the item list comes from the WebView page over the bridge. A future `uiSync/*` call would need no relay change, because only the methods on the [privileged list](SECURITY.md#privileged-methods) are held back.
 

@@ -100,6 +100,18 @@ export interface Config {
    */
   privilegedMethods: PrivilegedPolicy
   /**
+   * Whether a signed-in remote client keeps the `ui-sync` settings calls under
+   * `privilegedMethods: loopback-only`.
+   *
+   * On, a password session, a paired device, and a device's WebView may still
+   * call `settings/describe` (answer cut down to `ui-sync`) and
+   * `settings/mutate` (namespace `ui-sync` only). Off, those two calls are
+   * pinned like every other privileged method, exactly as before 0.5.0. The
+   * setting widens nothing: it has no effect under `allow-authenticated`, which
+   * already serves the whole plane, and address grants never reach either call.
+   */
+  uiSyncSettings: boolean
+  /**
    * Whether this relay may link with another relay as a computer.
    *
    * On, the Computers page can share this PC by pairing code and connect this
@@ -174,6 +186,7 @@ export interface ConfigSchema {
   lockoutMs: Volatile<number>
   rateLimitPerMinute: Volatile<number>
   privilegedMethods: Volatile<PrivilegedPolicy>
+  uiSyncSettings: Volatile<boolean>
   peersEnabled: Volatile<boolean>
   peerTimeoutMs: Volatile<number>
   extraProxyPaths: Volatile<string[]>
@@ -253,6 +266,9 @@ export const Config = z.object({
   privilegedMethods: z.union(['allow-authenticated', 'loopback-only'] as const).default('allow-authenticated')
     .description('Whether an authenticated remote client reaches the harness configuration plane.')
     .volatile(),
+  uiSyncSettings: z.boolean().default(true)
+    .description('Under loopback-only, still let signed-in devices read and write the ui-sync settings namespace.')
+    .volatile(),
   peersEnabled: z.boolean().default(true)
     .description('Allow linking with another PC as a computer, in either direction.')
     .volatile(),
@@ -322,6 +338,7 @@ export function plainConfig(config: ConfigSchema): Config {
     lockoutMs: config.lockoutMs.get(),
     rateLimitPerMinute: config.rateLimitPerMinute.get(),
     privilegedMethods: config.privilegedMethods.get(),
+    uiSyncSettings: config.uiSyncSettings.get(),
     peersEnabled: config.peersEnabled.get(),
     peerTimeoutMs: config.peerTimeoutMs.get(),
     extraProxyPaths: [...config.extraProxyPaths.get()],

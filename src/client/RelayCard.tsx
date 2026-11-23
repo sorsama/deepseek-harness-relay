@@ -80,7 +80,7 @@ const FIELDS: readonly Field[] = [
 
 /** One switch the page offers, as a segmented control over a staged field. */
 interface Choice {
-  readonly field: 'privilegedMethods' | 'uiLink' | 'mdns' | 'peersEnabled'
+  readonly field: 'privilegedMethods' | 'uiSyncSettings' | 'uiLink' | 'mdns' | 'peersEnabled'
   /** What the field resolves to when the section carries no value of its own. */
   readonly fallback: string
   readonly label: string
@@ -99,6 +99,13 @@ const CHOICES: readonly Choice[] = [
       { value: 'allow-authenticated', label: 'Allow once authenticated' },
       { value: 'loopback-only', label: 'This machine only' },
     ],
+  },
+  {
+    field: 'uiSyncSettings',
+    fallback: 'true',
+    label: 'Phone add-on placement',
+    hint: 'With configuration kept to this machine, signed-in devices can still choose where each add-on shows (phone, desktop, both, or off). Nothing else in settings. Turn this off to keep that on this machine too.',
+    options: [{ value: 'true', label: 'Allowed' }, { value: 'false', label: 'This machine only' }],
   },
   {
     field: 'uiLink',
@@ -129,6 +136,7 @@ export interface RelayValue {
   readonly port?: number
   readonly tls?: string
   readonly privilegedMethods?: string
+  readonly uiSyncSettings?: boolean
   readonly uiLink?: boolean
   readonly mdns?: boolean
   readonly peersEnabled?: boolean
@@ -162,6 +170,7 @@ export interface RelayCardState extends Shell {
   readonly rateLimitPerMinute: FieldState
   readonly peerTimeoutMs: FieldState
   readonly privilegedMethods: FieldState
+  readonly uiSyncSettings: FieldState
   readonly uiLink: FieldState
   readonly mdns: FieldState
   readonly peersEnabled: FieldState
