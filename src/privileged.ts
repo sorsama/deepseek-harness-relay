@@ -107,3 +107,35 @@ export function isPinnedMethod(pathname: string, allowed: boolean): boolean {
   const method = apiMethodOf(pathname)
   return method !== undefined && PRIVILEGED_METHODS.has(method)
 }
+
+/**
+ * The one settings namespace a remote client reaches when the configuration
+ * plane is otherwise pinned to loopback.
+ *
+ * It belongs to the `dsh-ui-sync` companion and holds one thing: where each
+ * web plugin item shows (both, phone, desktop, or off). The phone app reads and
+ * writes it so its add-ons screen and its WebView agree with the desktop. It
+ * holds no secret and changes nothing about what the agent may do, which is the
+ * whole argument for exempting it — and why the exemption is this one name in
+ * code rather than a list an operator could widen to `relay` or a credential
+ * namespace by mistake.
+ */
+export const REMOTE_SETTINGS_NAMESPACE = 'ui-sync'
+
+/** The pinned endpoints a remote client may call, narrowed to {@link REMOTE_SETTINGS_NAMESPACE}. */
+export type ScopedSettingsMethod = 'settings/describe' | 'settings/mutate'
+
+/**
+ * Whether a pinned endpoint has a namespace-scoped form a remote client may use.
+ *
+ * Only these two. `settings/update` and `settings/replace` write the same
+ * namespace another way and the companion does not use them; every other
+ * pinned endpoint (credentials, model discovery, host pickers, agent presets,
+ * the settings document) stays loopback-only with no exception.
+ * @param pathname - the request pathname.
+ * @returns the scoped method, or undefined when the endpoint has no scoped form.
+ */
+export function scopedSettingsMethod(pathname: string): ScopedSettingsMethod | undefined {
+  const method = apiMethodOf(pathname)
+  return method === 'settings/describe' || method === 'settings/mutate' ? method : undefined
+}

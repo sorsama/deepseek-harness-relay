@@ -18,7 +18,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import QRCode from 'qrcode'
 import type { Authenticator, Identity } from './auth/index.ts'
-import { SESSION_COOKIE } from './auth/index.ts'
+import { DEVICE_COOKIE, SESSION_COOKIE } from './auth/index.ts'
 import { pairingPayload } from './auth/pairing.ts'
 import type { ComputersContext } from './computers.ts'
 import { acceptLink, connectToPeer, listPeers, openNonces, requestOpen } from './computers.ts'
@@ -41,6 +41,9 @@ import { parseFields, readBody, safeNextPath, sendHtml, sendJson, sendRedirect, 
 
 /** Prefix owning every route in this module. */
 export const RELAY_PREFIX = '/relay'
+
+/** Longest landing path a session handoff accepts; anything longer lands on the root. */
+const MAX_NEXT_LENGTH = 2048
 
 /** What a route handler is given. */
 export interface RouteContext {
@@ -69,6 +72,21 @@ export interface RouteContext {
   /** Whether this request arrived over TLS, deciding the cookie's Secure flag. */
   readonly secure: boolean
   readonly now: number
+}
+
+/**
+ * Where a session handoff lands, confined to this origin.
+ *
+ * It ends up in a `Location` header, so anything outside printable ASCII is
+ * refused outright rather than escaped: a control character there is a header
+ * injection, and no harness route needs one.
+ * @param requested - the `next` the app asked for, if any.
+ * @returns a same-origin absolute path, defaulting to the root.
+ */
+function landingPath(requested: string | undefined): string {
+  if (requested === undefined || requested.length > MAX_NEXT_LENGTH) return '/'
+  if (!/^[\x21-\x7e]*$/.test(requested)) return '/'
+  return safeNextPath(requested)
 }
 
 /** Whether this identity may issue invitations and manage devices. */
@@ -431,6 +449,68 @@ export async function handleRelayRoute(
     await auth.signOutEverywhere()
     const cookie = sessionCookie({ name: SESSION_COOKIE, value: '', maxAgeSeconds: 0, secure: context.secure })
     sendRedirect(res, '/relay/login', { 'set-cookie': cookie })
+    return
+  }
+
+  // ---- a paired device's WebView session
+
+  if (path === '/relay/session/open' && method === 'POST') {
+    // The bearer token itself, and nothing weaker or merely equivalent: an
+    // operator has no device to hand a session to, and a device session must
+    // not mint its successor, or a cookie lifted from a WebView would renew
+    // itself for as long as the device stays paired.
+    if (identity.credential !== 'device' || identity.deviceId === undefined) {
+      sendJson(res, 403, { error: 'forbidden', message: 'present this device\'s bearer token to open a session' })
+      return
+    }
+    const body = await readBody(req)
+    if (body === undefined) {
+      sendJson(res, 413, { error: 'too-large', message: 'Request too large.' })
+      return
+    }
+    const opened = auth.openDeviceSession(identity.deviceId, landingPath(parseFields(req, body).next), now)
+    if (opened === undefined) {
+      sendJson(res, 403, { error: 'forbidden', message: 'this device is no longer paired' })
+      return
+    }
+    const enterPath = `/relay/session/enter?code=${encodeURIComponent(opened.code)}`
+    sendJson(res, 200, {
+      code: opened.code,
+      path: enterPath,
+      url: `${context.origin}${enterPath}`,
+      expiresAt: opened.expiresAt,
+    })
+    return
+  }
+
+  if (path === '/relay/session/enter' && method === 'GET') {
+    const entered = auth.enterDeviceSession(url.searchParams.get('code') ?? '', now)
+    if (entered === undefined) {
+      // 403 like every other unauthorized answer. The code is single-use, so
+      // a reload after the cookie was set lands here too; the app asks for a
+      // fresh code rather than retrying this one.
+      const message = 'That handoff code was already used, has expired, or its device is no longer paired. Open it again from the app.'
+      if (wantsJson(req)) {
+        sendJson(res, 403, { error: 'handoff-failed', message }, { 'referrer-policy': 'no-referrer' })
+        return
+      }
+      sendHtml(res, 403, messagePage({ title: 'Handoff not accepted', message, kind: 'error' }), {
+        'referrer-policy': 'no-referrer',
+      })
+      return
+    }
+    const cookie = sessionCookie({
+      name: DEVICE_COOKIE,
+      value: entered.cookie,
+      maxAgeSeconds: Math.max(1, Math.floor((entered.expiresAt - now) / 1000)),
+      secure: context.secure,
+    })
+    // A redirect, not the interstitial the computer handoff uses: the app
+    // starts this navigation itself, so the chain is same-site and the Strict
+    // cookie rides the very next request, and a transparent WebView would
+    // otherwise flash a relay page over the chat. No-referrer keeps the spent
+    // code out of the next request's headers.
+    sendRedirect(res, entered.next, { 'set-cookie': cookie, 'referrer-policy': 'no-referrer' })
     return
   }
 

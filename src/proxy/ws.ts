@@ -21,23 +21,44 @@ import type { Duplex } from 'node:stream'
 import { loopbackAuthority, type UpstreamTarget } from './http.ts'
 import { upstreamHeaders } from './rewrite.ts'
 
-/** Tracks live upgraded sockets so teardown can force them closed. */
+/**
+ * Tracks live upgraded sockets so teardown can force them closed.
+ *
+ * Each socket remembers whose credential opened it, so a revocation can close
+ * exactly the downlinks it took away: one device's, or every remote one.
+ */
 export class SocketLedger {
-  readonly #sockets = new Set<Duplex>()
+  /** socket → the device id or `password` that opened it; undefined for the operator at the machine. */
+  readonly #sockets = new Map<Duplex, string | undefined>()
 
   /**
    * Register a socket and forget it again when it closes.
    * @param socket - the upgraded socket.
+   * @param owner - the device id, `password` for a sign-in, or undefined for loopback.
    */
-  track(socket: Duplex): void {
-    this.#sockets.add(socket)
+  track(socket: Duplex, owner?: string): void {
+    this.#sockets.set(socket, owner)
     socket.once('close', () => { this.#sockets.delete(socket) })
   }
 
   /** Destroy every tracked socket. */
   destroyAll(): void {
-    for (const socket of this.#sockets) socket.destroy()
+    for (const socket of this.#sockets.keys()) socket.destroy()
     this.#sockets.clear()
+  }
+
+  /**
+   * Destroy the sockets a revocation took away.
+   * @param owner - one owner to close; undefined closes every socket a remote
+   * credential opened, and leaves the operator's own loopback sockets alone.
+   */
+  destroyOwned(owner: string | undefined): void {
+    for (const [socket, opener] of this.#sockets) {
+      if (opener === undefined) continue
+      if (owner !== undefined && opener !== owner) continue
+      socket.destroy()
+      this.#sockets.delete(socket)
+    }
   }
 
   /** How many sockets are live. */
@@ -82,6 +103,7 @@ function tune(socket: Duplex): void {
  * @param head - bytes the client already sent past the handshake.
  * @param target - the loopback harness.
  * @param ledger - registry the established socket pair joins.
+ * @param owner - whose credential opened it, so a revocation can close it.
  */
 export function forwardUpgrade(
   req: IncomingMessage,
@@ -89,6 +111,7 @@ export function forwardUpgrade(
   head: Buffer,
   target: UpstreamTarget,
   ledger: SocketLedger,
+  owner?: string,
 ): void {
   // The session is read before the upstream opens, so the client socket waits
   // a moment with nothing listening for its errors — and an unheard 'error'
@@ -96,7 +119,7 @@ export function forwardUpgrade(
   // rather than this one socket. Both are caught here.
   const early = (): void => { socket.destroy() }
   socket.on('error', early)
-  startUpgrade(req, socket, head, target, ledger, early).catch(() => {
+  startUpgrade(req, socket, head, target, ledger, early, owner).catch(() => {
     if (!socket.destroyed) rejectUpgrade(socket, 502, 'Bad Gateway')
   })
 }
@@ -112,6 +135,7 @@ export function forwardUpgrade(
  * @param target - the loopback harness.
  * @param ledger - registry the established socket pair joins.
  * @param early - the provisional error listener, replaced once the upstream opens.
+ * @param owner - whose credential opened it, so a revocation can close it.
  */
 async function startUpgrade(
   req: IncomingMessage,
@@ -120,6 +144,7 @@ async function startUpgrade(
   target: UpstreamTarget,
   ledger: SocketLedger,
   early: () => void,
+  owner: string | undefined,
 ): Promise<void> {
   const authority = loopbackAuthority(target)
   const cookie = await target.session?.cookieFor(authority)
@@ -166,8 +191,8 @@ async function startUpgrade(
 
     tune(socket)
     tune(upstreamSocket)
-    ledger.track(socket)
-    ledger.track(upstreamSocket)
+    ledger.track(socket, owner)
+    ledger.track(upstreamSocket, owner)
 
     upstreamSocket.on('error', abandon)
     socket.removeListener('error', abandon)
