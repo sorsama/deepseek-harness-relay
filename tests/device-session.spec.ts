@@ -770,6 +770,31 @@ describe('the ui-sync settings namespace under loopback-only', () => {
   })
 })
 
+describe('recording a device as seen', () => {
+  it('logs a failed write instead of leaving an unhandled rejection', async () => {
+    const { token } = await pairDevice()
+    const logged: string[] = []
+    const listener = await startListener({
+      runtime: { auth, config: configFor(), target: { host: '127.0.0.1', port: upstreamPort, timeoutMs: 5000 }, log: (line) => { logged.push(line) } },
+      bind: '127.0.0.1',
+      port: 0,
+      authorities: ['127.0.0.1', 'localhost'],
+    })
+    extraListeners.push(listener)
+    // A reload or shutdown closes the store while a request is still being
+    // answered; the last-seen write that request queued then fails.
+    await store.close()
+    const answer = await fetch(`http://127.0.0.1:${String(listener.port)}/api/settings/describe`, {
+      method: 'POST',
+      headers: { ...REMOTE, authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      body: envelope('settings/describe', {}),
+    })
+    expect(answer.status).toBe(200)
+    await new Promise((resolve) => { setTimeout(resolve, 50) })
+    expect(logged.some(line => line.includes('could not record device') && line.includes('state store is closed'))).toBe(true)
+  })
+})
+
 describe('the uiSyncSettings owner switch', () => {
   it('is on unless the operator turns it off', () => {
     expect(configFor().uiSyncSettings).toBe(true)

@@ -268,7 +268,7 @@ async function serve(
     // exactly the pre-0.5.0 one.
     if (scoped !== undefined && runtime.config.uiSyncSettings && reachesScopedSettings(identity)) {
       if (identity.deviceId !== undefined) {
-        void runtime.auth.touch(identity.deviceId, address, now)
+        touchDevice(runtime, identity.deviceId, address, now)
       }
       await serveScopedSettings(req, res, scoped, runtime.target, runtime.log)
       return
@@ -282,10 +282,29 @@ async function serve(
   }
 
   if (identity.deviceId !== undefined) {
-    void runtime.auth.touch(identity.deviceId, address, now)
+    touchDevice(runtime, identity.deviceId, address, now)
   }
 
   await forward(req, res, runtime.target)
+}
+
+/**
+ * Record a device's address and last-seen time without holding the request.
+ *
+ * The write is fire-and-forget, so its failure must be caught here: a full
+ * disk, or a store already closed by a reload or shutdown that raced a fast
+ * answer, would otherwise surface as an unhandled rejection, which Node
+ * treats as fatal. Losing one last-seen stamp is harmless; the next request
+ * writes it again.
+ * @param runtime - the relay runtime.
+ * @param deviceId - the device that made the request.
+ * @param address - normalized source address.
+ * @param now - current epoch millis.
+ */
+function touchDevice(runtime: RelayRuntime, deviceId: string, address: string, now: number): void {
+  runtime.auth.touch(deviceId, address, now).catch((error: unknown) => {
+    runtime.log(`could not record device ${deviceId} as seen: ${String(error)}`)
+  })
 }
 
 /**
@@ -378,7 +397,7 @@ function serveUpgrade(
     return
   }
   if (identity.deviceId !== undefined) {
-    void runtime.auth.touch(identity.deviceId, address, now)
+    touchDevice(runtime, identity.deviceId, address, now)
   }
   forwardUpgrade(req, socket, head, runtime.target, ledger, socketOwner(identity))
 }
