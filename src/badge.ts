@@ -18,6 +18,15 @@
  * self-signed certificate it cannot load, and a failed main-frame navigation
  * there is fatal. A dead link is the right failure; a broken application is
  * not. See the note in `src/index.ts` where the redirect used to live.
+ *
+ * An embedding page can hide it by putting `data-dsh-relay-badge="off"` on
+ * its `<html>` element, which the stylesheet honours. The transform sees only
+ * the HTML, never the request, so the relay cannot tell an embedded WebView
+ * from a browser tab; the embedder says so itself, from a document-start
+ * script, early enough for the link never to paint (the client guide shows
+ * the fallback for a hook that runs before `<html>` exists). It stays a
+ * stylesheet rule rather than a script, so the link still needs no script at
+ * all, and it works on the harness's own port too.
  * @module dsh-relay/badge
  */
 
@@ -26,6 +35,9 @@ const ELEMENT_ID = 'dsh-relay-link'
 
 /** Where the link points. */
 const TARGET_PATH = '/relay/devices'
+
+/** The `<html>` attribute an embedder sets to `off` to hide the link. */
+export const BADGE_ATTRIBUTE = 'data-dsh-relay-badge'
 
 /** The anchor and its stylesheet, injected before the closing body tag. */
 const MARKUP = `<a id="${ELEMENT_ID}" href="${TARGET_PATH}" title="dsh-relay — pairing, devices, and password">
@@ -59,6 +71,7 @@ const MARKUP = `<a id="${ELEMENT_ID}" href="${TARGET_PATH}" title="dsh-relay —
   background: var(--dsw-alias-interactive-bg-hover, rgba(38, 49, 72, 0.06));
 }
 @media (prefers-reduced-motion: reduce) { #${ELEMENT_ID} { transition: none; } }
+html[${BADGE_ATTRIBUTE}="off"] #${ELEMENT_ID} { display: none !important; }
 </style>`
 
 /**

@@ -62,6 +62,7 @@ For permanent changes, add a `relay` row to `~/.dsh/profiles/web/cordis.patch.ym
     tlsKeyPath: '/path/to/privkey.pem'
     publicHostnames: ['relay.example.com']
     privilegedMethods: 'allow-authenticated'
+    uiSyncSettings: true
     compat:
       addressGrants: true
       addressGrantTtlMs: 86400000
@@ -93,7 +94,8 @@ Changes to this file apply without a restart. Installing or removing the plugin 
 | `pairingCodeLength` | `8` | Digits in a pairing code, from 6 to 12. |
 | `maxFailedAttempts` / `lockoutMs` | 5 / 15 minutes | Wrong guesses allowed from one address, and how long it's locked out after that. |
 | `rateLimitPerMinute` | `600` | Requests allowed per minute from one address. |
-| `privilegedMethods` | `allow-authenticated` | Whether a signed-in remote device can reach harness settings, credentials, model discovery, and the host's folder pickers. Set `loopback-only` to keep those on the harness machine. Devices let in by address never reach them. On harness 0.1.2 and later this setting is the only thing guarding them, because the harness no longer restricts them itself. |
+| `privilegedMethods` | `allow-authenticated` | Whether a signed-in remote device can reach harness settings, credentials, model discovery, and the host's folder pickers. Set `loopback-only` to keep those on the harness machine; the one exception is the `ui-sync` plugin-targets namespace, which signed-in devices can still read and write ([why](SECURITY.md#the-one-exception-ui-sync)) unless you turn `uiSyncSettings` off. Devices let in by address never reach them. On harness 0.1.2 and later this setting is the only thing guarding them, because the harness no longer restricts them itself. |
+| `uiSyncSettings` | `true` | Under `privilegedMethods: loopback-only`, whether signed-in devices can still read and write the `ui-sync` namespace, which says where each web plugin item shows (phone, desktop, both, or off). Set `false` to keep every settings call on the harness machine, as before 0.5.0. The phone app then can't change where add-ons show. It has no effect under `allow-authenticated`. |
 | `extraProxyPaths` | `[]` | More path prefixes (each starting with `/`) that a write request may go to. |
 | `peersEnabled` | `true` | Allow linking this relay with another PC: share this one, or connect to another and open its harness here. Both computers need this on. |
 | `peerTimeoutMs` | 2 seconds | How long one call to a linked computer may take before the Computers page shows it as not answering. |
@@ -125,7 +127,7 @@ Forward the relay's port, never the harness's. Then:
 - Add the public name you'll use to `publicHostnames`. Otherwise the relay refuses requests addressed to it.
 - Use a real certificate. Self-signed with pinning is fine on a home network, but not on the open internet.
 - Turn off `compat.addressGrants`. Behind carrier-grade NAT, your public address is shared with strangers, and the relay won't trust a public address anyway.
-- Set `privilegedMethods: loopback-only`. On harness 0.1.2 and later this is the only thing keeping settings and credentials away from remote devices, since the harness serves its whole API to anyone signed in.
+- Set `privilegedMethods: loopback-only`. On harness 0.1.2 and later this is the only thing keeping settings and credentials away from remote devices, since the harness serves its whole API to anyone signed in. Signed-in devices can still choose where add-ons show (the `ui-sync` namespace); add `uiSyncSettings: false` if you want no settings call at all from the internet.
 
 ### Reverse proxies
 

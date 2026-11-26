@@ -40,6 +40,7 @@ const FORM_FIELDS = [
   'lockoutMs',
   'rateLimitPerMinute',
   'privilegedMethods',
+  'uiSyncSettings',
   'extraProxyPaths',
   'proxyTimeoutMs',
   'uiLink',
@@ -107,6 +108,7 @@ describe('the settings-card contract', () => {
     expect(plain.port).toBe(3443)
     expect(plain.tls).toBe('self-signed')
     expect(plain.privilegedMethods).toBe('allow-authenticated')
+    expect(plain.uiSyncSettings).toBe(true)
     expect(plain.compat.addressGrants).toBe(true)
     // The arrays are copied out of their handles rather than aliased, so the
     // plugin can keep treating them as mutable data.

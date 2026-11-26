@@ -12,7 +12,8 @@
  *    does not know about;
  * 5. authentication;
  * 6. the pinned-method gate, which re-imposes upstream's loopback-only set
- *    that step 7 is about to lift;
+ *    that step 7 is about to lift — with one namespace-scoped exception for
+ *    `settings/describe` and `settings/mutate`, served by reading the body;
  * 7. the proxy, which rewrites `Host` to loopback and forwards.
  *
  * Reordering any of these is a vulnerability, not a refactor.
@@ -27,10 +28,11 @@ import { isForwarded } from './auth/index.ts'
 import type { Authenticator, CredentialClass, Identity } from './auth/index.ts'
 import type { Config } from './config.ts'
 import { checkFence, isLoopbackHostname } from './fence.ts'
-import { isPinnedMethod } from './privileged.ts'
+import { isPinnedMethod, scopedSettingsMethod } from './privileged.ts'
 import type { PairingAddress } from './origins.ts'
 import { forward, type UpstreamTarget } from './proxy/http.ts'
 import { normalizeAddress } from './proxy/rewrite.ts'
+import { serveScopedSettings } from './proxy/scoped-settings.ts'
 import { forwardUpgrade, rejectUpgrade, SocketLedger } from './proxy/ws.ts'
 import { handleRelayRoute, isAuthenticated, RELAY_PREFIX } from './routes.ts'
 import type { TlsMaterial } from './tls.ts'
@@ -80,7 +82,7 @@ interface ListenerPolicy {
 /** The primary listener: every credential class, every relay route. */
 const PRIMARY_POLICY = (secure: boolean): ListenerPolicy => ({
   secure,
-  accepts: new Set<CredentialClass>(['loopback', 'session', 'device', 'address-grant']),
+  accepts: new Set<CredentialClass>(['loopback', 'session', 'device', 'device-session', 'address-grant']),
   servesRelayRoutes: true,
 })
 
@@ -89,10 +91,11 @@ const PRIMARY_POLICY = (secure: boolean): ListenerPolicy => ({
  *
  * It exists for one client — DSH Mobile 0.5.0, which hardcodes `http://` and
  * cannot reach a TLS listener at all. It therefore accepts only the credential
- * classes that client can actually carry, refuses password sessions (a sign-in
- * cookie must never cross an unencrypted hop), and serves no relay routes
- * except the liveness probe: pairing happens over the primary listener or on
- * loopback, where the minted token is not readable off the wire.
+ * classes that client can actually carry, refuses browser sessions of either
+ * kind (a session cookie must never cross an unencrypted hop, and a device's
+ * WebView session is minted on the primary listener), and serves no relay
+ * routes except the liveness probe: pairing happens over the primary listener
+ * or on loopback, where the minted token is not readable off the wire.
  */
 const COMPAT_POLICY: ListenerPolicy = {
   secure: false,
@@ -260,6 +263,16 @@ async function serve(
   }
 
   if (isPinnedMethod(url.pathname, identity.privileged)) {
+    const scoped = scopedSettingsMethod(url.pathname)
+    // `uiSyncSettings: false` drops the exception, so the pinned set is
+    // exactly the pre-0.5.0 one.
+    if (scoped !== undefined && runtime.config.uiSyncSettings && reachesScopedSettings(identity)) {
+      if (identity.deviceId !== undefined) {
+        touchDevice(runtime, identity.deviceId, address, now)
+      }
+      await serveScopedSettings(req, res, scoped, runtime.target, runtime.log)
+      return
+    }
     runtime.log(`refused ${url.pathname} for ${identity.credential}: privileged method`)
     sendJson(res, 403, {
       error: 'forbidden',
@@ -269,10 +282,55 @@ async function serve(
   }
 
   if (identity.deviceId !== undefined) {
-    void runtime.auth.touch(identity.deviceId, address, now)
+    touchDevice(runtime, identity.deviceId, address, now)
   }
 
   await forward(req, res, runtime.target)
+}
+
+/**
+ * Record a device's address and last-seen time without holding the request.
+ *
+ * The write is fire-and-forget, so its failure must be caught here: a full
+ * disk, or a store already closed by a reload or shutdown that raced a fast
+ * answer, would otherwise surface as an unhandled rejection, which Node
+ * treats as fatal. Losing one last-seen stamp is harmless; the next request
+ * writes it again.
+ * @param runtime - the relay runtime.
+ * @param deviceId - the device that made the request.
+ * @param address - normalized source address.
+ * @param now - current epoch millis.
+ */
+function touchDevice(runtime: RelayRuntime, deviceId: string, address: string, now: number): void {
+  runtime.auth.touch(deviceId, address, now).catch((error: unknown) => {
+    runtime.log(`could not record device ${deviceId} as seen: ${String(error)}`)
+  })
+}
+
+/**
+ * Whether an identity held off the pinned set may still make the
+ * namespace-scoped settings calls.
+ *
+ * Every credential that proves a person or a paired device does. An address
+ * grant does not: it is not authentication, and the docs promise it never
+ * reaches settings whatever the configuration says.
+ * @param identity - the request's verdict.
+ * @returns true when the scoped calls are open to it.
+ */
+export function reachesScopedSettings(identity: Identity): boolean {
+  return identity.credential === 'session'
+    || identity.credential === 'device'
+    || identity.credential === 'device-session'
+}
+
+/**
+ * Which revocation closes a socket this identity opens.
+ * @param identity - the upgrade's verdict.
+ * @returns the device id, `password` for a sign-in, or undefined for the operator at the machine.
+ */
+function socketOwner(identity: Identity): string | undefined {
+  if (identity.credential === 'loopback') return undefined
+  return identity.deviceId ?? 'password'
 }
 
 /**
@@ -339,9 +397,9 @@ function serveUpgrade(
     return
   }
   if (identity.deviceId !== undefined) {
-    void runtime.auth.touch(identity.deviceId, address, now)
+    touchDevice(runtime, identity.deviceId, address, now)
   }
-  forwardUpgrade(req, socket, head, runtime.target, ledger)
+  forwardUpgrade(req, socket, head, runtime.target, ledger, socketOwner(identity))
 }
 
 /** A running listener and the handle that shuts it down. */
@@ -372,6 +430,12 @@ export async function startListener(options: {
 }): Promise<RelayListener> {
   const policy = options.compat === true ? COMPAT_POLICY : PRIMARY_POLICY(options.tls !== undefined)
   const ledger = new SocketLedger()
+  // A revoked credential's next request is refused on its own, but a live
+  // downlink makes no further requests. Closing it here is what makes
+  // unpairing a device (or signing out everywhere) end its open streams too.
+  const unsubscribe = options.runtime.auth.onRevoked((revocation) => {
+    ledger.destroyOwned(revocation.kind === 'device' ? revocation.deviceId : undefined)
+  })
 
   const handler = (req: IncomingMessage, res: ServerResponse): void => {
     void serve(req, res, options.runtime, policy, options.authorities).catch((error: unknown) => {
@@ -398,9 +462,13 @@ export async function startListener(options: {
   server.setTimeout(120_000)
 
   await new Promise<void>((resolve, reject) => {
-    server.once('error', reject)
+    const failed = (error: Error): void => {
+      unsubscribe()
+      reject(error)
+    }
+    server.once('error', failed)
     server.listen(options.port, options.bind, () => {
-      server.removeListener('error', reject)
+      server.removeListener('error', failed)
       resolve()
     })
   })
@@ -411,6 +479,7 @@ export async function startListener(options: {
   return {
     port,
     close: async () => {
+      unsubscribe()
       // Upgraded sockets are excluded from closeAllConnections, and a live
       // downlink never ends on its own, so teardown would hang without the
       // ledger. Awaiting the close is what makes a config reload able to

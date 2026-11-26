@@ -18,6 +18,7 @@ import type { IncomingHttpHeaders } from 'node:http'
 import type { Config } from '../config.ts'
 import type { DeviceRecord, PeerRecord, RelayStore } from '../state.ts'
 import { isGrantableAddress } from '../fence.ts'
+import { HandoffCodes } from './handoff.ts'
 import { hashPassword, verifyPassword } from './password.ts'
 import { PairingWindow } from './pairing.ts'
 import { Throttle } from './ratelimit.ts'
@@ -34,6 +35,27 @@ import {
 
 /** Name of the signed sign-in cookie. */
 export const SESSION_COOKIE = 'dsh_relay_session'
+
+/**
+ * Name of the signed cookie a paired device's WebView carries.
+ *
+ * A separate name from {@link SESSION_COOKIE}, not a second subject under the
+ * same one: the two carry different authority (a sign-in is the operator, a
+ * device is not), and each name accepts exactly one subject shape, so a device
+ * cookie's value pasted under the sign-in name verifies as nothing.
+ */
+export const DEVICE_COOKIE = 'dsh_relay_device'
+
+/** Subject of a sign-in session. */
+const PASSWORD_SUBJECT = 'password'
+
+/** Prefix of a device session's subject; the device id follows it. */
+const DEVICE_SUBJECT_PREFIX = 'device:'
+
+/** What a revocation took away, for listeners that hold live connections. */
+export type Revocation =
+  | { readonly kind: 'device', readonly deviceId: string }
+  | { readonly kind: 'everyone' }
 
 /**
  * Headers a forwarding proxy stamps on the traffic it relays.
@@ -54,8 +76,15 @@ export function isForwarded(headers: IncomingHttpHeaders): boolean {
   return FORWARDING_TELLS.some(name => headers[name] !== undefined)
 }
 
-/** How a request proved who it is. */
-export type CredentialClass = 'loopback' | 'session' | 'device' | 'address-grant' | 'none'
+/**
+ * How a request proved who it is.
+ *
+ * `device-session` is a paired device's browser session, minted by the
+ * handoff for a WebView that cannot send the device's bearer token. It carries
+ * exactly the device's authority: never the operator's, refused wherever the
+ * device itself would be, and dead the moment the device is unpaired.
+ */
+export type CredentialClass = 'loopback' | 'session' | 'device' | 'device-session' | 'address-grant' | 'none'
 
 /** The verdict for one request. */
 export interface Identity {
@@ -65,8 +94,9 @@ export interface Identity {
   /**
    * Whether this request may reach the methods the harness pins to loopback.
    *
-   * True for a genuine loopback caller always, and for a session or device
-   * credential when the operator configured `privilegedMethods` to allow it.
+   * True for a genuine loopback caller always, and for a session, device, or
+   * device-session credential when the operator configured
+   * `privilegedMethods` to allow it.
    * Never true for an address grant: a source address is shared behind NAT,
    * reassigned by DHCP, rotated by IPv6 privacy extensions, and spoofable on
    * the same segment, so it cannot carry the configuration plane.
@@ -106,7 +136,10 @@ export class Authenticator {
   /** token hash → peer id, for tokens another relay presents to this one. */
   #peerIndex = new Map<string, string>()
   readonly #throttle: Throttle
+  readonly #revocationListeners = new Set<(revocation: Revocation) => void>()
   readonly pairing = new PairingWindow()
+  /** Outstanding device-to-browser handoff codes. */
+  readonly handoffs = new HandoffCodes()
 
   /**
    * @param store - the durable state store.
@@ -222,15 +255,30 @@ export class Authenticator {
       }
     }
 
+    // Only a password subject is a sign-in. A signature alone is not enough:
+    // every cookie this relay mints is signed with the same key, so a device
+    // session's value moved under this name must verify as nothing rather
+    // than seat a device in the operator's chair.
     const cookie = readCookie(request.headers.cookie, SESSION_COOKIE)
     if (cookie !== undefined) {
       const claims = verifySession(this.store.state.signingKey, cookie, now)
-      if (claims !== undefined) {
-        return {
-          credential: 'session',
-          ...claims.subject !== 'password' && { deviceId: claims.subject },
-          privileged: allowPrivileged,
-        }
+      if (claims?.subject === PASSWORD_SUBJECT) {
+        return { credential: 'session', privileged: allowPrivileged }
+      }
+    }
+
+    // Checked against the live device on every request, not just at the
+    // handoff: unpairing the device ends its WebView's session on the next
+    // request, without waiting for the cookie to expire.
+    const deviceCookie = readCookie(request.headers.cookie, DEVICE_COOKIE)
+    if (deviceCookie !== undefined) {
+      const claims = verifySession(this.store.state.signingKey, deviceCookie, now)
+      const deviceId = claims?.subject.startsWith(DEVICE_SUBJECT_PREFIX) === true
+        ? claims.subject.slice(DEVICE_SUBJECT_PREFIX.length)
+        : undefined
+      const device = deviceId === undefined ? undefined : this.#liveDevice(deviceId, now)
+      if (device !== undefined) {
+        return { credential: 'device-session', deviceId: device.id, privileged: allowPrivileged }
       }
     }
 
@@ -258,11 +306,95 @@ export class Authenticator {
   #deviceForToken(token: string, now: number): DeviceRecord | undefined {
     const deviceId = this.#tokenIndex.get(hashToken(this.store.state.signingKey, token))
     if (deviceId === undefined) return undefined
-    const device = this.store.state.devices[deviceId]
+    return this.#liveDevice(deviceId, now)
+  }
+
+  /**
+   * A device that is still paired: present, unrevoked, and unexpired.
+   * @param deviceId - the device id.
+   * @param now - current epoch millis.
+   * @returns the device, or undefined when it may no longer authenticate.
+   */
+  #liveDevice(deviceId: string, now: number): DeviceRecord | undefined {
+    const device = Object.hasOwn(this.store.state.devices, deviceId) ? this.store.state.devices[deviceId] : undefined
     if (device === undefined || device.revokedAt !== undefined) return undefined
     // A clock step backwards would otherwise make an expired token look fresh.
     if (now >= device.expiresAt || now < device.createdAt) return undefined
     return device
+  }
+
+  /**
+   * Mint a single-use handoff code for a paired device.
+   *
+   * The caller must already have proved the device with its bearer token; a
+   * device session cannot mint one, so a cookie lifted out of a WebView cannot
+   * renew itself past its own expiry.
+   * @param deviceId - the device presenting its token.
+   * @param next - same-origin landing path, already validated.
+   * @param now - current epoch millis.
+   * @returns the code and its expiry, or undefined when the device is not live.
+   */
+  openDeviceSession(
+    deviceId: string,
+    next: string,
+    now: number,
+  ): { readonly code: string, readonly expiresAt: number } | undefined {
+    if (this.#liveDevice(deviceId, now) === undefined) return undefined
+    return this.handoffs.issue(deviceId, next, now)
+  }
+
+  /**
+   * Redeem a handoff code into a device-session cookie.
+   *
+   * The cookie lives no longer than a sign-in would (`sessionTtlMs`) and never
+   * past the device token's own expiry, so a handoff cannot extend a device.
+   * @param code - the code from the handoff URL.
+   * @param now - current epoch millis.
+   * @returns the cookie value, its expiry, the device, and where to land; or
+   * undefined when the code is unknown, used, expired, or its device is gone.
+   */
+  enterDeviceSession(code: string, now: number): (SignInSuccess & { readonly deviceId: string, readonly next: string }) | undefined {
+    const grant = this.handoffs.consume(code, now)
+    if (grant === undefined) return undefined
+    const device = this.#liveDevice(grant.deviceId, now)
+    if (device === undefined) return undefined
+    const expiresAt = Math.min(now + this.config.sessionTtlMs, device.expiresAt)
+    return {
+      cookie: signSession(this.store.state.signingKey, {
+        subject: `${DEVICE_SUBJECT_PREFIX}${device.id}`,
+        issuedAt: now,
+        expiresAt,
+      }),
+      expiresAt,
+      deviceId: device.id,
+      next: grant.next,
+    }
+  }
+
+  /**
+   * Hear about revocations, to close what a request check cannot reach.
+   *
+   * Every request re-checks its credential, so a revoked device's next call is
+   * refused on its own. An established WebSocket makes no further calls,
+   * though; a listener holding one subscribes here and closes it.
+   * @param listener - called after each revocation is durable.
+   * @returns a function that unsubscribes.
+   */
+  onRevoked(listener: (revocation: Revocation) => void): () => void {
+    this.#revocationListeners.add(listener)
+    return () => { this.#revocationListeners.delete(listener) }
+  }
+
+  /** Tell every listener about one revocation; a throwing listener cannot stop the rest. */
+  #announce(revocation: Revocation): void {
+    for (const listener of this.#revocationListeners) {
+      try {
+        listener(revocation)
+      } catch {
+        // A listener only tears down connections; one that fails must not
+        // leave the others holding sockets the revocation meant to close.
+      }
+    }
   }
 
   /**
@@ -512,7 +644,7 @@ export class Authenticator {
    * @returns true when a live device was revoked.
    */
   async revoke(deviceId: string, now: number): Promise<boolean> {
-    const device = this.store.state.devices[deviceId]
+    const device = Object.hasOwn(this.store.state.devices, deviceId) ? this.store.state.devices[deviceId] : undefined
     if (device === undefined || device.revokedAt !== undefined) return false
     await this.store.update((draft) => {
       const record = draft.devices[deviceId]
@@ -522,6 +654,8 @@ export class Authenticator {
       }
     })
     this.#reindex()
+    this.handoffs.revokeDevice(deviceId)
+    this.#announce({ kind: 'device', deviceId })
     return true
   }
 
@@ -546,11 +680,15 @@ export class Authenticator {
     })
     this.#reindex()
     this.pairing.clear()
+    this.handoffs.clear()
+    this.#announce({ kind: 'everyone' })
   }
 
   /** Stop the throttle sweep. */
   dispose(): void {
     this.#throttle.dispose()
     this.pairing.clear()
+    this.handoffs.clear()
+    this.#revocationListeners.clear()
   }
 }

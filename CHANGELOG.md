@@ -1,5 +1,47 @@
 # Changelog
 
+## 0.5.0 — unreleased
+
+### Added
+
+- **A paired app can open the harness web UI in a WebView.** A WebView cannot
+  attach the app's bearer token to the requests its page makes (subresources,
+  `fetch`, WebSocket upgrades), so the app now trades the token for a
+  single-use code: `POST /relay/session/open` with `Authorization: Bearer`,
+  then the WebView loads `GET /relay/session/enter?code=…`, which sets an
+  `HttpOnly; SameSite=Strict` cookie (`Secure` on TLS) and redirects into the
+  harness. The code works once, for 60 seconds. The cookie lasts no longer
+  than a sign-in (`sessionTtlMs`) and never past the device token's own
+  expiry. See [Client integration](docs/CLIENT_INTEGRATION.md#opening-the-harness-web-ui-in-a-webview).
+- The WebView's session carries exactly the device's authority. It is not the
+  operator: the pairing, device, computer, and sign-out pages refuse it. It
+  cannot mint another code, the plain compatibility listener refuses it, and
+  unpairing the device ends it on the next request.
+- **The `ui-sync` settings namespace is reachable under
+  `privilegedMethods: loopback-only`.** The `dsh-ui-sync` companion keeps
+  where each web plugin item shows (phone, desktop, both, or off) there, and
+  the phone app reads and writes it. `settings/describe` is answered cut down
+  to that one namespace, and `settings/mutate` is checked by the namespace in
+  its payload and forwarded rebuilt from the checked fields. Every other
+  settings call, credentials, model discovery, the host pickers, and agent
+  presets stay on the harness machine. Address grants still reach none of it.
+- **`uiSyncSettings`** (default `true`) turns that exception off. With
+  `uiSyncSettings: false`, `settings/describe` and `settings/mutate` are
+  pinned under `loopback-only` exactly as in 0.4.0, so a remote client
+  reaches no settings call at all. It is also on the relay's settings page as
+  **Phone add-on placement**. It has no effect under `allow-authenticated`.
+- An embedding page can hide the corner **Relay** link by setting
+  `data-dsh-relay-badge="off"` on its `<html>` element.
+
+### Changed
+
+- **Unpairing a device now also closes its open WebSockets**, and **Sign out
+  everywhere** closes every remote one. Before, a revoked token was refused on
+  its next request, but a downlink it had already opened stayed open until it
+  dropped on its own. The operator's own loopback connections are left alone.
+- The sign-in cookie is accepted only with the password subject it is minted
+  with. No release minted any other subject, so no browser is signed out.
+
 ## 0.4.0 — 2026-11-09
 
 ### Added
